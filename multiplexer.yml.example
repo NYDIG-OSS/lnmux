@@ -1,0 +1,14 @@
+lnd:
+  nodes:
+    - tlsCertPath: /Users/joost.jager/Library/Application Support/Lnd/tls.cert
+      macaroonPath: /Users/joost.jager/Library/Application Support/Lnd/data/chain/bitcoin/regtest/admin.macaroon
+      lndUrl: 127.0.0.1:10009
+      pubKey: 020723c6f2203f1072336bd0e71bf4d11e367ab0b3010ce60c080abef0d4770db8
+    - tlsCertPath: /Users/joost.jager/Library/Application Support/Lnd/tls.cert
+      macaroonPath: /Users/joost.jager/.lnd-charlie/data/chain/bitcoin/regtest/admin.macaroon
+      lndUrl: 127.0.0.1:10003
+      pubKey: 026ff75cb2ff49b864833aa3c93970069070231a9ad64819252e190406dd0a6976
+  network: regtest
+  timeout: 10s
+dsn: postgres://bottle:bottle@localhost:45432/lnmux?sslmode=disable
+identityKey: 0a02030405060708010203040506070801020304050607080102030405060708
