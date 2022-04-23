@@ -1,6 +1,7 @@
 package lnmux
 
 import (
+	"context"
 	"time"
 
 	"github.com/lightningnetwork/lnd/lntypes"
@@ -13,13 +14,13 @@ type MockInvoiceDb struct {
 	SettleErr error
 }
 
-func (m *MockInvoiceDb) Get(hash lntypes.Hash) (*InvoiceCreationData, map[CircuitKey]int64,
+func (m *MockInvoiceDb) Get(ctx context.Context, hash lntypes.Hash) (*InvoiceCreationData, map[CircuitKey]int64,
 	error) {
 
 	return m.Invoice, m.Htlcs, nil
 }
 
-func (m *MockInvoiceDb) Settle(hash lntypes.Hash,
+func (m *MockInvoiceDb) Settle(ctx context.Context, hash lntypes.Hash,
 	htlcs map[CircuitKey]int64) error {
 
 	time.Sleep(1 * time.Second)

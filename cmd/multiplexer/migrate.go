@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/bottlepay/lnmux/persistence/migrations"
-	"github.com/go-pg/pg/v9"
+	"github.com/go-pg/pg/v10"
 	"github.com/urfave/cli/v2"
 )
 
@@ -33,7 +33,7 @@ func migrateAction(c *cli.Context) error {
 		return err
 	}
 
-	dsn := cfg.DSN
+	dsn := cfg.DB.DSN
 
 	dbSettings, err := pg.ParseURL(dsn)
 	if err != nil {

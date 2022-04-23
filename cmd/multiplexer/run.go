@@ -1,16 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/bottlepay/lnmux"
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
 	"github.com/bottlepay/lnmux/persistence"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/go-pg/pg/v10"
 	"github.com/urfave/cli/v2"
 )
 
@@ -26,10 +29,7 @@ func runAction(c *cli.Context) error {
 	}
 
 	// Setup persistence.
-	db, err := persistence.NewPostgresPersister(&persistence.PostgresOptions{
-		DSN:    cfg.DSN,
-		Logger: log,
-	})
+	db, err := initPersistence(cfg)
 	if err != nil {
 		return err
 	}
@@ -140,4 +140,30 @@ func network(network string) (*chaincfg.Params, error) {
 	}
 
 	return nil, fmt.Errorf("unsupported network %v", network)
+}
+
+func initPersistence(cfg *Config) (*persistence.PostgresPersister, error) {
+	options, err := pg.ParseURL(cfg.DB.DSN)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply connection options
+	options.PoolSize = cfg.DB.PoolSize
+	options.MinIdleConns = cfg.DB.MinIdleConns
+	options.MaxConnAge = cfg.DB.MaxConnAge
+	options.PoolTimeout = cfg.DB.PoolTimeout
+	options.IdleTimeout = cfg.DB.IdleTimeout
+
+	// Setup persistence
+	db := persistence.NewPostgresPersisterFromOptions(options)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	// Ensure we can reach the server
+	if err := db.Ping(ctx); err != nil {
+		return nil, err
+	}
+
+	return db, nil
 }

@@ -1,17 +1,24 @@
 package persistence
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/bottlepay/lnmux"
-	"github.com/go-pg/pg/v9"
-	"github.com/go-pg/pg/v9/orm"
+	"github.com/go-pg/pg/v10"
+	"github.com/go-pg/pg/v10/orm"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwire"
-	"go.uber.org/zap"
 )
+
+// TxConn defines a database connection capable of running transactions
+type TxConn interface {
+	orm.DB
+	RunInTransaction(ctx context.Context, fn func(*pg.Tx) error) error
+	Begin() (*pg.Tx, error)
+}
 
 type Invoice struct {
 	InvoiceCreationData
@@ -55,96 +62,11 @@ type dbHtlc struct {
 
 // PostgresPersister persists items to Postgres
 type PostgresPersister struct {
-	Logger *zap.SugaredLogger
-
-	Options *PostgresOptions
-	Conn    orm.DB
-
-	parent *PostgresPersister
+	conn TxConn
 }
 
-// PostgresOptions defines options for the Postgres server
-type PostgresOptions struct {
-	DSN string
-
-	Logger *zap.SugaredLogger
-}
-
-// child clones the current PostgresPersister and sets its connections to the ones provided.
-func (p *PostgresPersister) child(writeConn orm.DB) *PostgresPersister {
-	ret := *p
-	ret.Conn = writeConn
-	ret.parent = p
-
-	return &ret
-}
-
-// Atomic executes a function atomically. If it returns an error then any changes
-// made will be rolled back.
-// In the context of Postgres, the function is executed within a transaction.
-func (p *PostgresPersister) Atomic(f func(p *PostgresPersister) error) error {
-	if p.parent != nil {
-		return fmt.Errorf("postgres does not support nested transactions")
-	}
-
-	writeConn, ok := p.Conn.(*pg.DB)
-	if !ok {
-		return fmt.Errorf("unexpected internal connection type")
-	}
-
-	tx, err := writeConn.Begin()
-	if err != nil {
-		return err
-	}
-
-	// Always rollback if there's a panic
-	defer func() {
-		if r := recover(); r != nil {
-			if tx != nil {
-				_ = tx.Rollback()
-				panic(r)
-			}
-		}
-	}()
-
-	child := p.child(tx)
-	err = f(child)
-	if err != nil {
-		_ = tx.Rollback()
-
-		return err
-	}
-
-	return tx.Commit()
-}
-
-// NewPostgresPersister creates a new PostgresPersister using the options provided
-func NewPostgresPersister(options *PostgresOptions) (*PostgresPersister, error) {
-	persister := &PostgresPersister{
-		Logger:  options.Logger,
-		Options: options,
-	}
-
-	if options.DSN == "" {
-		return nil, fmt.Errorf("primary connection string is required")
-	}
-
-	writeConn, _, err := persister.newConnection(options.DSN)
-	if err != nil {
-		return nil, err
-	}
-	persister.Conn = writeConn
-
-	// Ensure the server(s) can be connected to
-	if err = persister.Ping(); err != nil {
-		return nil, err
-	}
-
-	return persister, nil
-}
-
-func (p *PostgresPersister) Delete(hash lntypes.Hash) error {
-	result, err := p.Conn.Model((*dbInvoice)(nil)).
+func (p *PostgresPersister) Delete(ctx context.Context, hash lntypes.Hash) error {
+	result, err := p.conn.ModelContext(ctx, (*dbInvoice)(nil)).
 		Where("hash = ?", hash).Delete()
 
 	if err != nil {
@@ -158,11 +80,11 @@ func (p *PostgresPersister) Delete(hash lntypes.Hash) error {
 	return nil
 }
 
-func (p *PostgresPersister) Get(hash lntypes.Hash) (*Invoice,
+func (p *PostgresPersister) Get(ctx context.Context, hash lntypes.Hash) (*Invoice,
 	map[lnmux.CircuitKey]int64, error) {
 
 	var dbInvoice dbInvoice
-	err := p.Conn.Model(&dbInvoice).
+	err := p.conn.ModelContext(ctx, &dbInvoice).
 		Where("hash=?", hash).Select()
 	switch {
 	case err == pg.ErrNoRows:
@@ -173,7 +95,7 @@ func (p *PostgresPersister) Get(hash lntypes.Hash) (*Invoice,
 	}
 
 	var dbHtlcs []*dbHtlc
-	err = p.Conn.Model(&dbHtlcs).
+	err = p.conn.ModelContext(ctx, &dbHtlcs).
 		Where("hash=?", hash).Select()
 	if err != nil {
 		return nil, nil, err
@@ -206,12 +128,10 @@ func (p *PostgresPersister) Get(hash lntypes.Hash) (*Invoice,
 	return invoice, htlcs, nil
 }
 
-func (p *PostgresPersister) Settle(hash lntypes.Hash,
+func (p *PostgresPersister) Settle(ctx context.Context, hash lntypes.Hash,
 	htlcs map[lnmux.CircuitKey]int64) error {
 
-	return p.Atomic(func(p *PostgresPersister) error {
-		writeConn := p.Conn
-
+	return p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
 		var totalAmt int64
 		for key, amt := range htlcs {
 			dbHtlc := dbHtlc{
@@ -220,7 +140,7 @@ func (p *PostgresPersister) Settle(hash lntypes.Hash,
 				HtlcID:     key.HtlcID,
 				AmountMsat: amt,
 			}
-			_, err := writeConn.Model(&dbHtlc).Insert()
+			_, err := tx.Model(&dbHtlc).Insert()
 			if err != nil {
 				return fmt.Errorf("cannot insert htlc: %w", err)
 			}
@@ -228,7 +148,7 @@ func (p *PostgresPersister) Settle(hash lntypes.Hash,
 			totalAmt += amt
 		}
 
-		result, err := writeConn.Model(&dbInvoice{}).
+		result, err := tx.Model(&dbInvoice{}).
 			Set("settled=?", true).
 			Set("settled_at=?", time.Now().UTC()).
 			Where("hash=?", hash).
@@ -245,7 +165,7 @@ func (p *PostgresPersister) Settle(hash lntypes.Hash,
 	})
 }
 
-func (p *PostgresPersister) Add(invoice *InvoiceCreationData) error {
+func (p *PostgresPersister) Add(ctx context.Context, invoice *InvoiceCreationData) error {
 	dbInvoice := &dbInvoice{
 		CreatedAt:      invoice.CreatedAt,
 		Hash:           invoice.PaymentPreimage.Hash(),
@@ -257,32 +177,44 @@ func (p *PostgresPersister) Add(invoice *InvoiceCreationData) error {
 		ID:             invoice.ID,
 	}
 
-	_, err := p.Conn.Model(dbInvoice).Insert()
+	_, err := p.conn.ModelContext(ctx, dbInvoice).Insert()
 
 	return err
 }
 
-// Ping pings the database connections to ensure they exist
-func (p *PostgresPersister) Ping() error {
-	if p.Conn != nil {
-		if _, err := p.Conn.ExecOne("SELECT 1"); err != nil {
+// Ping pings the database connection to ensure it is available
+func (p *PostgresPersister) Ping(ctx context.Context) error {
+	if p.conn != nil {
+		if _, err := p.conn.ExecOneContext(ctx, "SELECT 1"); err != nil {
 			return err
 		}
-	}
-
-	if _, err := p.Conn.ExecOne("SELECT 1"); err != nil {
-		return err
 	}
 
 	return nil
 }
 
-func (p *PostgresPersister) newConnection(dsn string) (orm.DB, *pg.Options, error) {
-	settings, err := pg.ParseURL(dsn)
-	if err != nil {
-		return nil, nil, err
-	}
-	conn := pg.Connect(settings)
+// NewPostgresPersisterFromOptions creates a new PostgresPersister using the options provided
+func NewPostgresPersisterFromOptions(options *pg.Options) *PostgresPersister {
+	conn := pg.Connect(options)
 
-	return conn, settings, nil
+	return NewPostgresPersister(conn)
+}
+
+// NewPostgresPersisterFromDSN creates a new PostgresPersister using the dsn provided
+func NewPostgresPersisterFromDSN(dsn string) (*PostgresPersister, error) {
+	options, err := pg.ParseURL(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewPostgresPersisterFromOptions(options), nil
+}
+
+// NewPostgresPersister creates a new PostgresPersister using the existing db connection provided
+func NewPostgresPersister(conn TxConn) *PostgresPersister {
+	persister := &PostgresPersister{
+		conn: conn,
+	}
+
+	return persister
 }

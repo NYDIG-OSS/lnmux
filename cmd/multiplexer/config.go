@@ -12,10 +12,10 @@ import (
 
 type Config struct {
 	// Lnd contains the configuration of the nodes.
-	Lnd LndConfig
+	Lnd LndConfig `yaml:"lnd"`
 
-	// DSN is the connection string for the database.
-	DSN string
+	// DB contains the database config.
+	DB DbConfig `yaml:"db"`
 
 	// IdentityKey is the private key that is used to sign invoices.
 	IdentityKey string `yaml:"identityKey"`
@@ -59,6 +59,35 @@ type LndConfig struct {
 
 	// Timeout is a generic time limit waiting for calls to lnd to complete
 	Timeout time.Duration `yaml:"timeout"`
+}
+
+type DbConfig struct {
+	// DSN is the connection string for the database.
+	DSN string `yaml:"dsn"`
+
+	// Maximum number of socket connections.
+	// Default is 10 connections per every CPU as reported by runtime.NumCPU.
+	PoolSize int `yaml:"poolSize"`
+
+	// Minimum number of idle connections which is useful when establishing
+	// new connection is slow.
+	MinIdleConns int `yaml:"minIdleConns"`
+
+	// Connection age at which client retires (closes) the connection.
+	// It is useful with proxies like PgBouncer and HAProxy.
+	// Default is to not close aged connections.
+	MaxConnAge time.Duration `yaml:"maxConnAge"`
+
+	// Time for which client waits for free connection if all
+	// connections are busy before returning an error.
+	// Default is 30 seconds if ReadTimeOut is not defined, otherwise,
+	// ReadTimeout + 1 second.
+	PoolTimeout time.Duration `yaml:"poolTimeout"`
+
+	// Amount of time after which client closes idle connections.
+	// Should be less than server's timeout.
+	// Default is 5 minutes. -1 disables idle timeout check.
+	IdleTimeout time.Duration `yaml:"idleTimeout"`
 }
 
 func loadConfig(filename string) (*Config, error) {

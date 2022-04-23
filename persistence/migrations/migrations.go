@@ -1,7 +1,7 @@
 package migrations
 
 import (
-	"github.com/go-pg/migrations/v7"
+	"github.com/go-pg/migrations/v8"
 )
 
 var Collection = migrations.NewCollection()
