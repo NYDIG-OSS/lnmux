@@ -32,9 +32,6 @@ type Mux struct {
 
 	lnd    []lnd.LndClient
 	logger *zap.SugaredLogger
-
-	wg   sync.WaitGroup
-	quit chan struct{}
 }
 
 type MuxConfig struct {
@@ -84,33 +81,19 @@ func New(cfg *MuxConfig) (*Mux,
 		sphinx:   sphinx,
 		lnd:      cfg.Lnd,
 		logger:   cfg.Logger,
-
-		quit: make(chan struct{}),
 	}, nil
 }
 
-func (p *Mux) Start() error {
+func (p *Mux) Run(ctx context.Context) error {
 	if err := p.registry.Start(); err != nil {
 		return err
 	}
 
 	// Start multiplexer main loop.
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-
-		err := p.run()
-		if err != nil {
-			p.logger.Errorf("Invoice multiplexer error: %v", err)
-		}
-	}()
-
-	return nil
-}
-
-func (p *Mux) Stop() error {
-	close(p.quit)
-	p.wg.Wait()
+	err := p.run(ctx)
+	if err != nil {
+		return err
+	}
 
 	if err := p.registry.Stop(); err != nil {
 		return err
@@ -305,10 +288,7 @@ func (p *Mux) interceptHtlcs(ctx context.Context,
 	}()
 }
 
-func (p *Mux) run() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+func (p *Mux) run(ctx context.Context) error {
 	// Register for htlc interception and block events.
 	htlcChan := make(chan *interceptedHtlc)
 	heightChan := make(chan int)
@@ -321,7 +301,7 @@ func (p *Mux) run() error {
 	var height int
 	select {
 	case height = <-heightChan:
-	case <-p.quit:
+	case <-ctx.Done():
 		return nil
 	}
 
@@ -354,7 +334,7 @@ func (p *Mux) run() error {
 				return err
 			}
 
-		case <-p.quit:
+		case <-ctx.Done():
 			return nil
 		}
 	}
