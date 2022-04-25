@@ -8,11 +8,16 @@ Even with all nodes in the cluster available, it can be advantageous for the sen
 
 ## Running
 
-For the setup, it is assumed that there are multiple LND nodes running with connections to the wider Lightning network and sufficient inbound liquidity. Several LND changes are required for this to work. These changes are in master, but not in a release yet. So for now, the LND nodes need to be build from master.
+For the setup, it is assumed that there are multiple LND nodes running with connections to the wider Lightning network and sufficient inbound liquidity. Several LND changes are required for this to work. These changes are in master, but not in a release yet. So for now, the LND nodes need to be built from master.
 
 `lnmux` is a library that is intended for integration into an existing backend service. For demonstration purposes, a self-contained executable is provided in `cmd/multiplexer`.
 
 The steps below describe how to use this executable.
+
+* Run the `lnd` nodes with the `--requireinterceptor` option. This ensures that
+  HTLCs are always offered to interceptor applications eventually, even when
+  there are momentary disconnects. Not running with this option can lead to
+  HTLCs failing after the invoice that they pay to has been marked as settled. 
 
 * Create a postgres database
 
