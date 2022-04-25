@@ -1,6 +1,7 @@
 package lnmux
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -75,8 +76,8 @@ func (r *htlcReleaseEvent) Less(other queue.PriorityQueueItem) bool {
 }
 
 type InvoiceDb interface {
-	Get(hash lntypes.Hash) (*InvoiceCreationData, map[CircuitKey]int64, error)
-	Settle(hash lntypes.Hash, htlcs map[CircuitKey]int64) error
+	Get(ctx context.Context, hash lntypes.Hash) (*InvoiceCreationData, map[CircuitKey]int64, error)
+	Settle(ctx context.Context, hash lntypes.Hash, htlcs map[CircuitKey]int64) error
 }
 
 type invoiceState struct {
@@ -185,7 +186,7 @@ func (i *InvoiceRegistry) invoiceEventLoop() {
 			}
 
 		case htlc := <-i.htlcChan:
-			err := i.process(htlc)
+			err := i.process(context.TODO(), htlc)
 			if err != nil {
 				i.logger.Errorf("Process: %v", err)
 			}
@@ -284,7 +285,7 @@ type registryHtlc struct {
 	resolve       func(HtlcResolution)
 }
 
-func (i *InvoiceRegistry) process(h *registryHtlc) error {
+func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	// Always require an mpp record.
 	mpp := h.payload.MultiPath()
 	if mpp == nil {
@@ -297,7 +298,7 @@ func (i *InvoiceRegistry) process(h *registryHtlc) error {
 
 	state, ok := i.invoices[h.rHash]
 	if !ok {
-		dbInvoice, htlcs, err := i.cdb.Get(h.rHash)
+		dbInvoice, htlcs, err := i.cdb.Get(ctx, h.rHash)
 		switch {
 		case err == ErrInvoiceNotFound:
 			// If the invoice was not found, return a failure
@@ -446,7 +447,7 @@ func (i *InvoiceRegistry) process(h *registryHtlc) error {
 		htlcMap[key] = int64(htlc.Amt)
 	}
 
-	err := i.cdb.Settle(h.rHash, htlcMap)
+	err := i.cdb.Settle(ctx, h.rHash, htlcMap)
 	if err != nil {
 		i.logger.Debugw("Cannot settle", "err", err)
 

@@ -1,15 +1,15 @@
 package persistence
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/go-pg/pg/v9"
+	"github.com/go-pg/pg/v10"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 
 	"github.com/bottlepay/lnmux"
 	"github.com/bottlepay/lnmux/persistence/migrations"
@@ -20,12 +20,7 @@ func setupTestDB(t *testing.T) (*pg.DB, *PostgresPersister) {
 		MigrationsPath: "./migrations",
 	})
 
-	log, _ := zap.NewDevelopment()
-
-	db, err := NewPostgresPersister(&PostgresOptions{
-		DSN:    dsn,
-		Logger: log.Sugar(),
-	})
+	db, err := NewPostgresPersisterFromDSN(dsn)
 	require.NoError(t, err)
 
 	return conn, db
@@ -99,10 +94,10 @@ func TestSettleInvoice(t *testing.T) {
 	hash := preimage.Hash()
 
 	// Initially no invoices are expected.
-	_, _, err := persister.Get(hash)
+	_, _, err := persister.Get(context.Background(), hash)
 	require.ErrorIs(t, err, lnmux.ErrInvoiceNotFound)
 
-	require.NoError(t, persister.Add(&InvoiceCreationData{
+	require.NoError(t, persister.Add(context.Background(), &InvoiceCreationData{
 		CreatedAt:      time.Unix(100, 0),
 		PaymentRequest: "ln...",
 		InvoiceCreationData: lnmux.InvoiceCreationData{
@@ -114,7 +109,7 @@ func TestSettleInvoice(t *testing.T) {
 		ID: 123,
 	}))
 
-	invoice, htlcs, err := persister.Get(hash)
+	invoice, htlcs, err := persister.Get(context.Background(), hash)
 	require.NoError(t, err)
 	require.Empty(t, htlcs, 0)
 	require.Equal(t, invoice.PaymentRequest, "ln...")
@@ -130,5 +125,5 @@ func TestSettleInvoice(t *testing.T) {
 			HtlcID: 12,
 		}: 30,
 	}
-	require.NoError(t, persister.Settle(hash, htlcs))
+	require.NoError(t, persister.Settle(context.Background(), hash, htlcs))
 }

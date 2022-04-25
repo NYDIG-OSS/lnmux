@@ -10,5 +10,11 @@ lnd:
       pubKey: 026ff75cb2ff49b864833aa3c93970069070231a9ad64819252e190406dd0a6976
   network: regtest
   timeout: 10s
-dsn: postgres://bottle:bottle@localhost:45432/lnmux?sslmode=disable
 identityKey: 0a02030405060708010203040506070801020304050607080102030405060708
+db:
+  dsn: postgres://bottle:bottle@localhost:45432/lnmux?sslmode=disable
+  # poolSize: 5
+  # minIdleConns: 1
+  # maxConnAge: "15s"
+  # poolTimeout: "15s"
+  # idleTimeout: "15s"

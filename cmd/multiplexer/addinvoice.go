@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -44,10 +45,7 @@ func addInvoiceAction(c *cli.Context) (err error) {
 	}
 
 	// Setup persistence.
-	db, err := persistence.NewPostgresPersister(&persistence.PostgresOptions{
-		DSN:    cfg.DSN,
-		Logger: log,
-	})
+	db, err := initPersistence(cfg)
 	if err != nil {
 		return err
 	}
@@ -96,7 +94,7 @@ func addInvoiceAction(c *cli.Context) (err error) {
 		ID:                  int64(rand.Int31()),
 		PaymentRequest:      invoice.PaymentRequest,
 	}
-	if err := db.Add(dbInvoice); err != nil {
+	if err := db.Add(context.Background(), dbInvoice); err != nil {
 		return err
 	}
 
