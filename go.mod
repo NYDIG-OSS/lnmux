@@ -12,7 +12,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/lightningnetwork/lightning-onion v1.0.2-0.20220211021909-bb84a1ccb0c5
-	github.com/lightningnetwork/lnd v0.14.1-beta.0.20220415230904-0b20dcc4f523
+	github.com/lightningnetwork/lnd v0.14.1-beta.0.20220425101129-0845c4daeb1e
 	github.com/lightningnetwork/lnd/clock v1.1.0
 	github.com/lightningnetwork/lnd/queue v1.1.0
 	github.com/stretchr/testify v1.7.0
@@ -29,7 +29,7 @@ require (
 	github.com/andybalholm/brotli v1.0.3 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/btcsuite/btcd/btcutil v1.1.1 // indirect
-	github.com/btcsuite/btcd/btcutil/psbt v1.1.2 // indirect
+	github.com/btcsuite/btcd/btcutil/psbt v1.1.3 // indirect
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f // indirect
 	github.com/btcsuite/btcwallet v0.14.1-0.20220412233800-3a6d5d0702b7 // indirect
 	github.com/btcsuite/btcwallet/wallet/txauthor v1.2.3 // indirect

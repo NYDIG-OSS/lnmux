@@ -2,6 +2,7 @@ package lnd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 )
 
 //go:generate mockgen --destination=mock_lnd_client.go --self_package=github.com/bottlepay/lnmux/lnd --package=lnd github.com/bottlepay/lnmux/lnd LndClient
+
+var ErrInterceptorNotRequired = errors.New("lnd requireinterceptor flag not set")
 
 type LndClient interface {
 	PubKey() common.PubKey
@@ -119,8 +122,7 @@ func (l *lndClient) Network() *chaincfg.Params {
 func (l *lndClient) RegisterBlockEpochNtfn(ctx context.Context) (
 	chan *chainrpc.BlockEpoch, chan error, error) {
 
-	notifierClient := chainrpc.NewChainNotifierClient(l.grpcClient)
-	stream, err := notifierClient.RegisterBlockEpochNtfn(
+	stream, err := l.notifierClient.RegisterBlockEpochNtfn(
 		ctx, &chainrpc.BlockEpoch{},
 	)
 	if err != nil {
@@ -151,8 +153,21 @@ func (l *lndClient) HtlcInterceptor(ctx context.Context) (
 	func() (*routerrpc.ForwardHtlcInterceptRequest, error),
 	error) {
 
-	routerClient := routerrpc.NewRouterClient(l.grpcClient)
-	stream, err := routerClient.HtlcInterceptor(ctx)
+	infoCtx, cancel := context.WithTimeout(ctx, l.cfg.Timeout)
+	defer cancel()
+
+	infoResp, err := l.lnClient.GetInfo(infoCtx, &lnrpc.GetInfoRequest{})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Check to see if lnd is running with --requireinterceptor. Otherwise usage
+	// of the HTLC interceptor API is unsafe.
+	if !infoResp.RequireHtlcInterceptor {
+		return nil, nil, ErrInterceptorNotRequired
+	}
+
+	stream, err := l.routerClient.HtlcInterceptor(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
