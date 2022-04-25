@@ -2,6 +2,7 @@ package lnmux
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -106,7 +107,13 @@ func TestMux(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, mux.Start())
+	errChan := make(chan error)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errChan <- mux.Run(ctx)
+	}()
 
 	// Send initial block heights.
 	blockChan1 <- &chainrpc.BlockEpoch{Height: 1000}
@@ -189,7 +196,8 @@ func TestMux(t *testing.T) {
 	htlcChan1 <- receiveHtlc(10, 10000)
 	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_FAIL)
 
-	require.NoError(t, mux.Stop())
+	cancel()
+	require.NoError(t, <-errChan)
 }
 
 // generateSphinxPacket generates then encodes a sphinx packet which encodes

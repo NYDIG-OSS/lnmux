@@ -67,9 +67,14 @@ func runAction(c *cli.Context) error {
 		return err
 	}
 
-	if err := mux.Start(); err != nil {
-		return err
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Run multiplexer.
+	errChan := make(chan error)
+	go func() {
+		errChan <- mux.Run(ctx)
+	}()
 
 	// Wait for break and terminate.
 	log.Infof("Press ctrl-c to exit")
@@ -78,11 +83,8 @@ func runAction(c *cli.Context) error {
 	<-sigint
 	log.Infof("Exiting")
 
-	if err := mux.Stop(); err != nil {
-		return err
-	}
-
-	return nil
+	cancel()
+	return <-errChan
 }
 
 func initLndClients(cfg *LndConfig) ([]lnd.LndClient, error) {
