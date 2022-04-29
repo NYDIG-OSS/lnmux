@@ -1,3 +1,5 @@
+// Copyright (C) 2015-2022 Lightning Labs and The Lightning Network Developers
+
 package lnmux
 
 import (
