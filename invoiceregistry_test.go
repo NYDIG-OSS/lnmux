@@ -10,6 +10,7 @@ import (
 	"github.com/go-pg/pg/v10"
 	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/lntypes"
+	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -22,6 +23,9 @@ type registryTestContext struct {
 	db              *persistence.PostgresPersister
 	cancelRegistry  func()
 	registryErrChan chan error
+	logger          *zap.SugaredLogger
+
+	testAmt int64
 }
 
 func newRegistryTestContext(t *testing.T) *registryTestContext {
@@ -38,10 +42,12 @@ func newRegistryTestContext(t *testing.T) *registryTestContext {
 	}
 
 	c := &registryTestContext{
-		t:   t,
-		pg:  pg,
-		cfg: cfg,
-		db:  db,
+		t:       t,
+		pg:      pg,
+		cfg:     cfg,
+		db:      db,
+		logger:  cfg.Logger,
+		testAmt: 10000,
 	}
 
 	c.start()
@@ -76,16 +82,24 @@ func (r *registryTestContext) close() {
 	r.pg.Close()
 }
 
-func (r *registryTestContext) addInvoice(id int) {
-	preimage := lntypes.Preimage{byte(id)}
-	payAddr := [32]byte{0, byte(id)}
+func (r *registryTestContext) preimage(id int) lntypes.Preimage {
+	return lntypes.Preimage{byte(id)}
+}
+
+func (r *registryTestContext) payAddr(id int) lntypes.Preimage {
+	return [32]byte{0, byte(id)}
+}
+
+func (r *registryTestContext) addInvoice(id int, expiry time.Duration) {
+	preimage := r.preimage(id)
+	payAddr := r.payAddr(id)
 
 	require.NoError(r.t, r.registry.NewInvoice(&persistence.InvoiceCreationData{
-		ExpiresAt: time.Now().Add(time.Second),
+		ExpiresAt: time.Now().Add(expiry),
 		InvoiceCreationData: types.InvoiceCreationData{
 			FinalCltvDelta:  40,
 			PaymentPreimage: preimage,
-			Value:           10000,
+			Value:           lnwire.MilliSatoshi(r.testAmt),
 			PaymentAddr:     payAddr,
 		},
 		CreatedAt:      time.Now(),
@@ -95,7 +109,7 @@ func (r *registryTestContext) addInvoice(id int) {
 }
 
 func (r *registryTestContext) subscribe(id int) (chan InvoiceUpdate, func()) {
-	preimage := lntypes.Preimage{byte(id)}
+	preimage := r.preimage(id)
 
 	updateChan := make(chan InvoiceUpdate)
 	cancel, err := r.registry.Subscribe(preimage.Hash(), func(update InvoiceUpdate) {
@@ -113,7 +127,7 @@ func TestInvoiceExpiry(t *testing.T) {
 	updateChan1, cancel1 := c.subscribe(1)
 
 	// Add invoice.
-	c.addInvoice(1)
+	c.addInvoice(1, time.Second)
 
 	// Expect an open notification.
 	update := <-updateChan1
@@ -127,7 +141,7 @@ func TestInvoiceExpiry(t *testing.T) {
 	cancel1()
 
 	// Add another invoice.
-	c.addInvoice(2)
+	c.addInvoice(2, time.Second)
 
 	// Expect the open update.
 	updateChan2, cancel2 := c.subscribe(2)
