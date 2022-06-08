@@ -410,7 +410,7 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			}
 
 			// Store settle request in database.
-			err := i.requestSettle(ctx, state)
+			err := i.markSettleRequested(ctx, state)
 			select {
 			case req.errChan <- err:
 			case <-i.quit:
@@ -890,7 +890,7 @@ type InvoiceUpdate struct {
 	CancelledReason persistence.CancelledReason
 }
 
-func (i *InvoiceRegistry) requestSettle(ctx context.Context,
+func (i *InvoiceRegistry) markSettleRequested(ctx context.Context,
 	state *invoiceState) error {
 
 	hash := state.invoice.PaymentPreimage.Hash()
