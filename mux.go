@@ -3,13 +3,13 @@ package lnmux
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	sphinx "github.com/lightningnetwork/lightning-onion"
-	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/htlcswitch/hop"
 	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/lightningnetwork/lnd/lnrpc"
@@ -20,10 +20,11 @@ import (
 
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
+	"github.com/bottlepay/lnmux/types"
 )
 
 const (
-	htlcHoldDuration = time.Second
+	resolutionQueueSize = 100
 )
 
 type Mux struct {
@@ -38,9 +39,9 @@ type MuxConfig struct {
 	KeyRing         keychain.SecretKeyRing
 	ActiveNetParams *chaincfg.Params
 
-	ChannelDb InvoiceDb
-	Lnd       []lnd.LndClient
-	Logger    *zap.SugaredLogger
+	Lnd      []lnd.LndClient
+	Logger   *zap.SugaredLogger
+	Registry *InvoiceRegistry
 }
 
 func New(cfg *MuxConfig) (*Mux,
@@ -56,16 +57,6 @@ func New(cfg *MuxConfig) (*Mux,
 		return nil, err
 	}
 
-	registry := NewRegistry(
-		cfg.ChannelDb,
-		&RegistryConfig{
-			Clock:                clock.NewDefaultClock(),
-			FinalCltvRejectDelta: 10,
-			HtlcHoldDuration:     htlcHoldDuration,
-			Logger:               cfg.Logger,
-		},
-	)
-
 	nodeKeyECDH := keychain.NewPubKeyECDH(idKeyDesc, cfg.KeyRing)
 
 	replayLog := &replayLog{}
@@ -77,7 +68,7 @@ func New(cfg *MuxConfig) (*Mux,
 	sphinx := hop.NewOnionProcessor(sphinxRouter)
 
 	return &Mux{
-		registry: registry,
+		registry: cfg.Registry,
 		sphinx:   sphinx,
 		lnd:      cfg.Lnd,
 		logger:   cfg.Logger,
@@ -85,9 +76,10 @@ func New(cfg *MuxConfig) (*Mux,
 }
 
 func (p *Mux) Run(ctx context.Context) error {
-	if err := p.registry.Start(); err != nil {
-		return err
-	}
+	registryErrChan := make(chan error)
+	go func() {
+		registryErrChan <- p.registry.Run(ctx)
+	}()
 
 	// Start multiplexer main loop.
 	err := p.run(ctx)
@@ -95,7 +87,9 @@ func (p *Mux) Run(ctx context.Context) error {
 		return err
 	}
 
-	if err := p.registry.Stop(); err != nil {
+	// Await registry termination.
+	err = <-registryErrChan
+	if err != nil {
 		return err
 	}
 
@@ -106,7 +100,7 @@ func (p *Mux) Run(ctx context.Context) error {
 
 type interceptedHtlc struct {
 	source         common.PubKey
-	circuitKey     CircuitKey
+	circuitKey     types.CircuitKey
 	hash           lntypes.Hash
 	onionBlob      []byte
 	amountMsat     int64
@@ -123,32 +117,23 @@ type interceptedHtlcResponse struct {
 	failureCode    lnrpc.Failure_FailureCode
 }
 
-type interceptedHtlcResponseWithKey struct {
-	*interceptedHtlcResponse
-
-	incomingCircuitKey CircuitKey
-}
-
 func (p *Mux) interceptHtlcs(ctx context.Context,
 	lnd lnd.LndClient, htlcChan chan *interceptedHtlc, heightChan chan int) {
 
-	var (
-		respChan = make(chan *interceptedHtlcResponseWithKey)
-		pubKey   = lnd.PubKey()
-	)
+	var pubKey = lnd.PubKey()
 
-	start := func() error {
-		p.logger.Debugw("Starting htlc interception", "node", pubKey)
+	logger := p.logger.With("node", pubKey)
 
-		// DEBUG TIMEOUT.
-		// streamCtx, streamCancel := context.WithTimeout(ctx, 10*time.Second)
+	start := func(ctx context.Context) error {
 		streamCtx, streamCancel := context.WithCancel(ctx)
 		defer streamCancel()
 
 		send, recv, err := lnd.HtlcInterceptor(streamCtx)
 		if err != nil {
-			return fmt.Errorf("cannot subscribe: %w", err)
+			return err
 		}
+
+		logger.Debugw("Starting htlc interception")
 
 		// Register for block notifications.
 		blockChan, blockErrChan, err := lnd.RegisterBlockEpochNtfn(streamCtx)
@@ -160,19 +145,27 @@ func (p *Mux) interceptHtlcs(ctx context.Context,
 		// set our initial height.
 		select {
 		case block := <-blockChan:
+			logger.Debugw("Initial block height", "height", block.Height)
 			heightChan <- int(block.Height)
 
 		case <-streamCtx.Done():
 			return streamCtx.Err()
 		}
 
-		errChan := make(chan error, 1)
+		var (
+			errChan   = make(chan error, 1)
+			replyChan = make(
+				chan *routerrpc.ForwardHtlcInterceptResponse,
+				resolutionQueueSize,
+			)
+			replyChanClosed bool
+		)
 
 		var wg sync.WaitGroup
 		defer wg.Wait()
 		wg.Add(1)
 
-		go func() {
+		go func(ctx context.Context) {
 			defer wg.Done()
 
 			for {
@@ -190,20 +183,45 @@ func (p *Mux) interceptHtlcs(ctx context.Context,
 					return
 				}
 
-				circuitKey := newCircuitKeyFromRPC(htlc.IncomingCircuitKey)
-
 				reply := func(resp *interceptedHtlcResponse) error {
-					select {
-					case respChan <- &interceptedHtlcResponseWithKey{
-						interceptedHtlcResponse: resp,
-						incomingCircuitKey:      circuitKey,
-					}:
-					case <-ctx.Done():
-						return ctx.Err()
+					// Don't try to write if the channel is closed. This
+					// callback does not need to be thread-safe.
+					if replyChanClosed {
+						return errors.New("reply channel closed")
 					}
 
-					return nil
+					rpcResp := &routerrpc.ForwardHtlcInterceptResponse{
+						IncomingCircuitKey: htlc.IncomingCircuitKey,
+						Action:             resp.action,
+						Preimage:           resp.preimage[:],
+						FailureMessage:     resp.failureMessage,
+						FailureCode:        resp.failureCode,
+					}
+
+					select {
+					case replyChan <- rpcResp:
+						return nil
+
+					// When the context is cancelled, close the reply channel.
+					// We don't want to skip this reply and on the next one send
+					// into the channel again.
+					case <-ctx.Done():
+						close(replyChan)
+						replyChanClosed = true
+
+						return ctx.Err()
+
+					// When the update channel is full, terminate the subscriber
+					// to prevent blocking multiplexer.
+					default:
+						close(replyChan)
+						replyChanClosed = true
+
+						return errors.New("reply channel full")
+					}
 				}
+
+				circuitKey := newCircuitKeyFromRPC(htlc.IncomingCircuitKey)
 
 				select {
 				case htlcChan <- &interceptedHtlc{
@@ -223,28 +241,10 @@ func (p *Mux) interceptHtlcs(ctx context.Context,
 					return
 				}
 			}
-		}()
+		}(ctx)
 
 		for {
 			select {
-			case resp := <-respChan:
-				circuitKey := &routerrpc.CircuitKey{
-					ChanId: resp.incomingCircuitKey.ChanID,
-					HtlcId: resp.incomingCircuitKey.HtlcID,
-				}
-				rpcResp := &routerrpc.ForwardHtlcInterceptResponse{
-					IncomingCircuitKey: circuitKey,
-					Action:             resp.action,
-					Preimage:           resp.preimage[:],
-					FailureMessage:     resp.failureMessage,
-					FailureCode:        resp.failureCode,
-				}
-				err := send(rpcResp)
-				if err != nil {
-					return fmt.Errorf(
-						"cannot send: %w", err)
-				}
-
 			case err := <-errChan:
 				return fmt.Errorf("stream error: %w", err)
 
@@ -256,6 +256,17 @@ func (p *Mux) interceptHtlcs(ctx context.Context,
 					return streamCtx.Err()
 				}
 
+			case rpcResp, ok := <-replyChan:
+				if !ok {
+					return errors.New("reply channel full")
+				}
+
+				err := send(rpcResp)
+				if err != nil {
+					return fmt.Errorf(
+						"cannot send: %w", err)
+				}
+
 			case err := <-blockErrChan:
 				return fmt.Errorf("block error: %w", err)
 
@@ -265,17 +276,17 @@ func (p *Mux) interceptHtlcs(ctx context.Context,
 		}
 	}
 
-	go func() {
+	go func(ctx context.Context) {
+		defer logger.Debugw("Exiting interceptor loop")
+
 		for {
-			err := start()
-			if err == nil {
+			err := start(ctx)
+			if err == nil || err == context.Canceled {
 				return
 			}
 
-			if err != context.Canceled {
-				p.logger.Debugw("Htlc interceptor error",
-					"err", err)
-			}
+			logger.Infow("Htlc interceptor error",
+				"err", err)
 
 			select {
 			// Retry delay.
@@ -285,7 +296,7 @@ func (p *Mux) interceptHtlcs(ctx context.Context,
 				return
 			}
 		}
-	}()
+	}(ctx)
 }
 
 func (p *Mux) run(ctx context.Context) error {
@@ -467,7 +478,6 @@ func (p *Mux) ProcessHtlc(
 			circuitKey:    htlc.circuitKey,
 			payload:       payload,
 			resolve: func(res HtlcResolution) {
-				// TODO: Goroutine to not block registry?
 				err := resolve(res)
 				if err != nil {
 					logger.Errorf("resolve error", "err", err)

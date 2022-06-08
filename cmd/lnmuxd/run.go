@@ -3,18 +3,24 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/bottlepay/lnmux"
+	"github.com/bottlepay/lnmux/cmd/lnmuxd/lnmux_proto"
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
 	"github.com/bottlepay/lnmux/persistence"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/go-pg/pg/v10"
+	"github.com/lightningnetwork/lnd/clock"
 	"github.com/urfave/cli/v2"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 var runCommand = &cli.Command{
@@ -50,41 +56,123 @@ func runAction(c *cli.Context) error {
 
 	activeNetParams := &chaincfg.RegressionNetParams
 
-	wrappedDb := &dbWrapper{
-		db: db,
+	// Get a new creator instance.
+	var gwPubKeys []common.PubKey
+	for _, lnd := range lnds {
+		gwPubKeys = append(gwPubKeys, lnd.PubKey())
+	}
+	creator, err := lnmux.NewInvoiceCreator(
+		&lnmux.InvoiceCreatorConfig{
+			KeyRing:         keyRing,
+			GwPubKeys:       gwPubKeys,
+			ActiveNetParams: &chaincfg.RegressionNetParams,
+		},
+	)
+	if err != nil {
+		return err
 	}
 
-	// Instantiate and start the multiplexer.
+	// Instantiate multiplexer.
+	registry := lnmux.NewRegistry(
+		db,
+		&lnmux.RegistryConfig{
+			Clock:                clock.NewDefaultClock(),
+			FinalCltvRejectDelta: 10,
+			HtlcHoldDuration:     30 * time.Second,
+			AcceptTimeout:        60 * time.Second,
+			Logger:               log,
+		},
+	)
+
 	mux, err := lnmux.New(
 		&lnmux.MuxConfig{
 			KeyRing:         keyRing,
 			ActiveNetParams: activeNetParams,
 			Lnd:             lnds,
-			ChannelDb:       wrappedDb,
 			Logger:          log,
+			Registry:        registry,
 		})
 	if err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	var (
+		wg             sync.WaitGroup
+		processErrChan = make(chan error)
+	)
 
 	// Run multiplexer.
-	errChan := make(chan error)
+	muxCtx, muxCancel := context.WithCancel(context.Background())
+	defer muxCancel()
+
+	wg.Add(1)
 	go func() {
-		errChan <- mux.Run(ctx)
+		defer wg.Done()
+
+		err := mux.Run(muxCtx)
+		if err != nil {
+			log.Errorw("mux error", "err", err)
+
+			processErrChan <- err
+		}
+	}()
+
+	// Start grpc server.
+	grpcServer := grpc.NewServer()
+	reflection.Register(grpcServer)
+
+	server, err := newServer(creator, registry)
+	if err != nil {
+		return err
+	}
+
+	lnmux_proto.RegisterServiceServer(
+		grpcServer, server,
+	)
+
+	grpcInternalListener, err := net.Listen("tcp", ":19090")
+	if err != nil {
+		return err
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		log.Infow("Grpc server startin on port 19090")
+		err := grpcServer.Serve(grpcInternalListener)
+		if err != nil && err != grpc.ErrServerStopped {
+			log.Errorw("grpc server error", "err", err)
+
+			processErrChan <- err
+		}
 	}()
 
 	// Wait for break and terminate.
 	log.Infof("Press ctrl-c to exit")
 	sigint := make(chan os.Signal, 1)
 	signal.Notify(sigint, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-	<-sigint
+
+	var processErr error
+	select {
+	case <-sigint:
+	case processErr = <-processErrChan:
+	}
+
+	// Stop grpc server.
+	log.Infof("Stopping grpc server")
+	grpcServer.Stop()
+
+	// Stop multiplexer.
+	log.Infof("Stopping multiplexer")
+	muxCancel()
+
+	log.Infow("Waiting for goroutines to finish")
+	wg.Wait()
+
 	log.Infof("Exiting")
 
-	cancel()
-	return <-errChan
+	return processErr
 }
 
 func initLndClients(cfg *LndConfig) ([]lnd.LndClient, error) {
@@ -158,7 +246,7 @@ func initPersistence(cfg *Config) (*persistence.PostgresPersister, error) {
 	options.IdleTimeout = cfg.DB.IdleTimeout
 
 	// Setup persistence
-	db := persistence.NewPostgresPersisterFromOptions(options)
+	db := persistence.NewPostgresPersisterFromOptions(options, log)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 

@@ -28,4 +28,4 @@ jobs:
         # populates the client with data, and retrieves data
         run: go test ./...
         env:
-          MULTIPLEXER_TEST_DB_DSN: "postgres://bottle_test:bottle_test@postgres/bottle_test?sslmode=disable"
+          LNMUX_TEST_DB_DSN: "postgres://bottle_test:bottle_test@postgres/bottle_test?sslmode=disable"

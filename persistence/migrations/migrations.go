@@ -9,7 +9,7 @@ var sqlDiscovered = false
 
 func init() {
 	Collection.DisableSQLAutodiscover(true)
-	Collection.SetTableName("multiplexer.migrations")
+	Collection.SetTableName("lnmux.migrations")
 
 }
 

@@ -45,6 +45,8 @@ const (
 	// ResultCannotSettle is returned when the invoice cannot be settled in
 	// the database.
 	ResultCannotSettle
+
+	ResultInvoiceExpired
 )
 
 // String returns a string representation of the result.
@@ -89,6 +91,9 @@ func (f FailResolutionResult) FailureString() string {
 
 	case ResultCannotSettle:
 		return "cannot settle"
+
+	case ResultInvoiceExpired:
+		return "invoice expired"
 
 	default:
 		return "unknown failure resolution result"

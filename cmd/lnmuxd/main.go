@@ -8,11 +8,10 @@ import (
 
 func main() {
 	app := &cli.App{
-		Name: "multiplexer",
+		Name: "lnmuxd",
 		Commands: []*cli.Command{
 			migrateCommand,
 			runCommand,
-			addInvoiceCommand,
 		},
 		Flags: []cli.Flag{
 			&cli.StringFlag{
