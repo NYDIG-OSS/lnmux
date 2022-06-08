@@ -422,34 +422,11 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 				break
 			}
 
-			// Delete in-memory record for this invoice. Only open invoices are
-			// kept in memory.
-			delete(i.invoices, req.hash)
-
-			// Notify subscribers that the htlcs should be settled
-			// with our peer.
-			for key := range state.acceptedHtlcs {
-				htlcSettleResolution := NewSettleResolution(
-					state.invoice.PaymentPreimage, ResultSettled,
-				)
-				i.notifyHodlSubscribers(key, htlcSettleResolution)
+			// Send settle signal to lnd node(s).
+			err = i.requestSettle(ctx, state)
+			if err != nil {
+				return err
 			}
-
-			// TODO: Wait for final settle event from lnd. Unfortunately this
-			// event is not yet implemented.
-
-			// Mark invoice as settled.
-			if err := i.cdb.Settle(ctx, req.hash); err != nil {
-				return errors.New("cannot settle invoice in database")
-			}
-
-			// Notify subscriber of settled invoice.
-			i.subscriptionManager.notifySubscribers(
-				req.hash,
-				InvoiceUpdate{
-					State: persistence.InvoiceStateSettled,
-				},
-			)
 
 		case req := <-i.cancelChan:
 			// Retrieve invoice.
@@ -888,6 +865,43 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 type InvoiceUpdate struct {
 	State           persistence.InvoiceState
 	CancelledReason persistence.CancelledReason
+}
+
+func (i *InvoiceRegistry) requestSettle(ctx context.Context,
+	state *invoiceState) error {
+
+	hash := state.invoice.PaymentPreimage.Hash()
+
+	// Delete in-memory record for this invoice. Only open invoices are
+	// kept in memory.
+	delete(i.invoices, hash)
+
+	// Notify subscribers that the htlcs should be settled
+	// with our peer.
+	for key := range state.acceptedHtlcs {
+		htlcSettleResolution := NewSettleResolution(
+			state.invoice.PaymentPreimage, ResultSettled,
+		)
+		i.notifyHodlSubscribers(key, htlcSettleResolution)
+	}
+
+	// TODO: Wait for final settle event from lnd. Unfortunately this
+	// event is not yet implemented.
+
+	// Mark invoice as settled.
+	if err := i.cdb.Settle(ctx, hash); err != nil {
+		return fmt.Errorf("cannot settle invoice in database: %w", err)
+	}
+
+	// Notify subscriber of settled invoice.
+	i.subscriptionManager.notifySubscribers(
+		hash,
+		InvoiceUpdate{
+			State: persistence.InvoiceStateSettled,
+		},
+	)
+
+	return nil
 }
 
 func (i *InvoiceRegistry) markSettleRequested(ctx context.Context,
