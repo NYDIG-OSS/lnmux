@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package lnmux;
+
+option go_package = "github.com/bottlepay/lnmux_proto";
+
+service Service {
+    rpc AddInvoice (AddInvoiceRequest) returns (AddInvoiceResponse);
+
+    rpc SubscribeSingleInvoice (SubscribeSingleInvoiceRequest) returns (stream SubscribeSingleInvoiceResponse);
+
+    rpc SettleInvoice (SettleInvoiceRequest) returns (SettleInvoiceResponse);
+
+    rpc CancelInvoice (CancelInvoiceRequest) returns (CancelInvoiceResponse);
+}
+
+message AddInvoiceRequest {
+    int64 amt_msat = 1;
+    string description = 2;
+    bytes description_hash = 3;
+    int64 expiry_secs = 4;
+}
+
+message AddInvoiceResponse {
+    string payment_request = 1;
+    bytes preimage = 2;
+    bytes hash = 3;
+}
+
+message SubscribeSingleInvoiceRequest {
+    bytes hash = 1;
+}
+
+message SubscribeSingleInvoiceResponse {
+    enum InvoiceState {
+      STATE_OPEN = 0;
+      STATE_ACCEPTED = 1;
+      STATE_SETTLE_REQUESTED = 2;
+      STATE_SETTLED = 3;
+      STATE_EXPIRED = 4;
+      STATE_CANCELLED = 5;
+    }
+
+    enum CancelledReason {
+      REASON_NONE = 0;
+      REASON_EXPIRED = 1;
+      REASON_ACCEPT_TIMEOUT = 2;
+      REASON_EXTERNAL = 3;
+    }
+    
+    InvoiceState state = 1;
+        
+    CancelledReason cancelled_reason = 2;
+}
+
+message SettleInvoiceRequest {
+    bytes hash = 1;
+}
+
+message SettleInvoiceResponse {}
+
+message CancelInvoiceRequest {
+    bytes hash = 1;
+}
+
+message CancelInvoiceResponse {}

@@ -14,6 +14,7 @@ import (
 	"github.com/lightningnetwork/lnd/zpay32"
 
 	"github.com/bottlepay/lnmux/common"
+	"github.com/bottlepay/lnmux/types"
 )
 
 const virtualChannel = 12345
@@ -61,13 +62,13 @@ func NewInvoiceCreator(cfg *InvoiceCreatorConfig) (*InvoiceCreator, error) {
 
 // TODO: Add description hash.
 func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
-	memo string, cltvDelta uint64) (*Invoice, lntypes.Hash,
-	error) {
+	memo string, descHash *lntypes.Hash, cltvDelta uint64) (
+	*Invoice, lntypes.Preimage, error) {
 
 	// Get features.
 	featureMgr, err := feature.NewManager(feature.Config{})
 	if err != nil {
-		return nil, lntypes.Hash{}, err
+		return nil, lntypes.Preimage{}, err
 	}
 
 	nodeKeySigner := keychain.NewPubKeyMessageSigner(
@@ -78,7 +79,7 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 
 	paymentPreimage := &lntypes.Preimage{}
 	if _, err := rand.Read(paymentPreimage[:]); err != nil {
-		return nil, lntypes.Hash{}, err
+		return nil, lntypes.Preimage{}, err
 	}
 	paymentHash := paymentPreimage.Hash()
 
@@ -104,6 +105,10 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 	// this will just be an empty string.
 	options = append(options, zpay32.Description(memo))
 
+	if descHash != nil {
+		options = append(options, zpay32.DescriptionHash(*descHash))
+	}
+
 	options = append(options, zpay32.CLTVExpiry(cltvDelta))
 
 	// Add virtual hop hints.
@@ -128,7 +133,7 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 	// intermediaries probing the receiver.
 	var paymentAddr [32]byte
 	if _, err := rand.Read(paymentAddr[:]); err != nil {
-		return nil, lntypes.Hash{}, err
+		return nil, lntypes.Preimage{}, err
 	}
 	options = append(options, zpay32.PaymentAddr(paymentAddr))
 
@@ -138,7 +143,7 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 		c.activeNetParams, paymentHash, creationDate, options...,
 	)
 	if err != nil {
-		return nil, lntypes.Hash{}, err
+		return nil, lntypes.Preimage{}, err
 	}
 
 	payReqString, err := payReq.Encode(zpay32.MessageSigner{
@@ -147,13 +152,13 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 		},
 	})
 	if err != nil {
-		return nil, lntypes.Hash{}, err
+		return nil, lntypes.Preimage{}, err
 	}
 
 	newInvoice := &Invoice{
 		CreationDate:   creationDate,
 		PaymentRequest: payReqString,
-		InvoiceCreationData: InvoiceCreationData{
+		InvoiceCreationData: types.InvoiceCreationData{
 			FinalCltvDelta:  int32(payReq.MinFinalCLTVExpiry()),
 			Value:           lnwire.MilliSatoshi(amtMSat),
 			PaymentPreimage: *paymentPreimage,
@@ -161,5 +166,5 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 		},
 	}
 
-	return newInvoice, paymentHash, nil
+	return newInvoice, *paymentPreimage, nil
 }

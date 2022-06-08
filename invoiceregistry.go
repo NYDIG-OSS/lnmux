@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bottlepay/lnmux/persistence"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwire"
@@ -49,6 +51,10 @@ type RegistryConfig struct {
 	// waiting for the other set members to arrive.
 	HtlcHoldDuration time.Duration
 
+	// AcceptTimeout defines for how long a complete htlc set is held before the
+	// invoice is cancelled.
+	AcceptTimeout time.Duration
+
 	// Clock holds the clock implementation that is used to provide
 	// Now() and TickAfter() and is useful to stub out the clock functions
 	// during testing.
@@ -57,34 +63,35 @@ type RegistryConfig struct {
 	Logger *zap.SugaredLogger
 }
 
-// htlcReleaseEvent describes an htlc auto-release event. It is used to release
-// mpp htlcs for which the complete set didn't arrive in time.
-type htlcReleaseEvent struct {
-	hash lntypes.Hash
-
-	// key is the circuit key of the htlc to release.
-	key CircuitKey
-
-	// releaseTime is the time at which to release the htlc.
-	releaseTime time.Time
-}
-
-// Less is used to order PriorityQueueItem's by their release time such that
-// items with the older release time are at the top of the queue.
-//
-// NOTE: Part of the queue.PriorityQueueItem interface.
-func (r *htlcReleaseEvent) Less(other queue.PriorityQueueItem) bool {
-	return r.releaseTime.Before(other.(*htlcReleaseEvent).releaseTime)
-}
-
-type InvoiceDb interface {
-	Get(ctx context.Context, hash lntypes.Hash) (*InvoiceCreationData, map[CircuitKey]int64, error)
-	Settle(ctx context.Context, hash lntypes.Hash, htlcs map[CircuitKey]int64) error
-}
+type InvoiceCallback func(update InvoiceUpdate)
 
 type invoiceState struct {
-	invoice       *InvoiceCreationData
-	acceptedHtlcs map[CircuitKey]*InvoiceHTLC
+	invoice       *types.InvoiceCreationData
+	acceptedHtlcs map[types.CircuitKey]*InvoiceHTLC
+}
+
+func (i *invoiceState) totalSetAmt() int {
+	total := 0
+	for _, htlc := range i.acceptedHtlcs {
+		total += int(htlc.Amt)
+	}
+	return total
+}
+
+type invoiceRequest struct {
+	hash    lntypes.Hash
+	errChan chan error
+}
+
+type invoiceSubscription struct {
+	hash     lntypes.Hash
+	callback InvoiceCallback
+	id       int
+}
+
+type invoiceSubscriptionCancelRequest struct {
+	hash lntypes.Hash
+	id   int
 }
 
 // InvoiceRegistry is a central registry of all the outstanding invoices
@@ -93,22 +100,29 @@ type invoiceState struct {
 type InvoiceRegistry struct {
 	sync.RWMutex
 
-	cdb InvoiceDb
+	cdb *persistence.PostgresPersister
 
 	// cfg contains the registry's configuration parameters.
 	cfg *RegistryConfig
 
 	// subscriptions is a map from a circuit key to a list of subscribers.
 	// It is used for efficient notification of links.
-	hodlSubscriptions map[CircuitKey][]func(HtlcResolution)
+	hodlSubscriptions map[types.CircuitKey][]func(HtlcResolution)
 
-	invoices map[lntypes.Hash]*invoiceState
-	htlcChan chan *registryHtlc
+	invoices       map[lntypes.Hash]*invoiceState
+	htlcChan       chan *registryHtlc
+	newInvoiceChan chan *persistence.InvoiceCreationData
+	settleChan     chan *invoiceRequest
+	cancelChan     chan *invoiceRequest
 
 	autoReleaseHeap *queue.PriorityQueue
 	logger          *zap.SugaredLogger
 
-	wg   sync.WaitGroup
+	newInvoiceSubscription    chan invoiceSubscription
+	cancelInvoiceSubscription chan invoiceSubscriptionCancelRequest
+
+	subscriptionManager *subscriptionManager
+
 	quit chan struct{}
 }
 
@@ -116,40 +130,173 @@ type InvoiceRegistry struct {
 // wraps the persistent on-disk invoice storage with an additional in-memory
 // layer. The in-memory layer is in place such that debug invoices can be added
 // which are volatile yet available system wide within the daemon.
-func NewRegistry(cdb InvoiceDb,
+func NewRegistry(cdb *persistence.PostgresPersister,
 	cfg *RegistryConfig) *InvoiceRegistry {
 
 	return &InvoiceRegistry{
-		cdb:               cdb,
-		hodlSubscriptions: make(map[CircuitKey][]func(HtlcResolution)),
-		cfg:               cfg,
-		invoices:          make(map[lntypes.Hash]*invoiceState),
-		htlcChan:          make(chan *registryHtlc),
-		quit:              make(chan struct{}),
-		logger:            cfg.Logger,
-		autoReleaseHeap:   &queue.PriorityQueue{},
+		cdb:                       cdb,
+		hodlSubscriptions:         make(map[types.CircuitKey][]func(HtlcResolution)),
+		cfg:                       cfg,
+		invoices:                  make(map[lntypes.Hash]*invoiceState),
+		htlcChan:                  make(chan *registryHtlc),
+		newInvoiceChan:            make(chan *persistence.InvoiceCreationData),
+		newInvoiceSubscription:    make(chan invoiceSubscription),
+		cancelInvoiceSubscription: make(chan invoiceSubscriptionCancelRequest),
+		subscriptionManager:       newSubscriptionManager(cfg.Logger),
+		settleChan:                make(chan *invoiceRequest),
+		cancelChan:                make(chan *invoiceRequest),
+		quit:                      make(chan struct{}),
+
+		logger:          cfg.Logger,
+		autoReleaseHeap: &queue.PriorityQueue{},
 	}
 }
 
 // Start starts the registry and all goroutines it needs to carry out its task.
-func (i *InvoiceRegistry) Start() error {
+func (i *InvoiceRegistry) Run(ctx context.Context) error {
 	i.logger.Info("InvoiceRegistry starting")
 
-	i.wg.Add(1)
-	go i.invoiceEventLoop()
+	pendingInvoices, err := i.cdb.GetOpen(ctx)
+	if err != nil {
+		return err
+	}
+
+	i.logger.Infow("Open invoices", "count", len(pendingInvoices))
+
+	for _, invoice := range pendingInvoices {
+		// Immediately fail invoices that expired while we were not running.
+		if time.Now().After(invoice.ExpiresAt) {
+			hash := invoice.PaymentPreimage.Hash()
+
+			i.logger.Debugw("Invoice expired",
+				"hash", hash, "expiresAt", invoice.ExpiresAt)
+
+			err := i.cdb.Fail(ctx, hash, persistence.CancelledReasonExpired)
+			if err != nil {
+				return err
+			}
+
+			continue
+		}
+
+		state := &invoiceState{
+			invoice:       &invoice.InvoiceCreationData.InvoiceCreationData,
+			acceptedHtlcs: make(map[types.CircuitKey]*InvoiceHTLC),
+		}
+
+		hash := invoice.PaymentPreimage.Hash()
+
+		i.invoices[hash] = state
+		i.startInvoiceExpireTimer(hash, invoice.ExpiresAt)
+
+		i.logger.Debugw("Pending invoice",
+			"hash", hash, "expiresAt", invoice.ExpiresAt)
+	}
+
+	err = i.invoiceEventLoop(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		i.logger.Errorw("InvoiceRegistry error", "err", err)
+
+		return err
+	}
+
+	i.logger.Info("InvoiceRegistry shutting down")
+	close(i.quit)
 
 	return nil
 }
 
-// Stop signals the registry for a graceful shutdown.
-func (i *InvoiceRegistry) Stop() error {
-	i.logger.Info("InvoiceRegistry shutting down")
+func (i *InvoiceRegistry) Subscribe(hash lntypes.Hash,
+	callback InvoiceCallback) (func(), error) {
 
-	close(i.quit)
+	subscriberId := i.subscriptionManager.generateSubscriptionId()
+	logger := i.logger.With("id", subscriberId, "hash", hash)
 
-	i.wg.Wait()
+	logger.Debugw("Adding subscriber")
+
+	select {
+	case i.newInvoiceSubscription <- invoiceSubscription{
+		callback: callback,
+		hash:     hash,
+		id:       subscriberId,
+	}:
+
+	case <-i.quit:
+		return nil, ErrShuttingDown
+	}
+
+	return func() {
+		logger.Debugw("Removing subscriber")
+
+		select {
+		case i.cancelInvoiceSubscription <- invoiceSubscriptionCancelRequest{
+			id:   subscriberId,
+			hash: hash,
+		}:
+		case <-i.quit:
+		}
+	}, nil
+}
+
+func (i *InvoiceRegistry) NewInvoice(invoice *persistence.InvoiceCreationData) error {
+	select {
+	case i.newInvoiceChan <- invoice:
+	case <-i.quit:
+		return ErrShuttingDown
+	}
 
 	return nil
+}
+
+func (i *InvoiceRegistry) RequestSettle(hash lntypes.Hash) error {
+
+	i.logger.Debugw("New settle request received", "hash", hash)
+
+	request := &invoiceRequest{
+		hash:    hash,
+		errChan: make(chan error),
+	}
+
+	select {
+	case i.settleChan <- request:
+
+	case <-i.quit:
+		return ErrShuttingDown
+	}
+
+	select {
+	case err := <-request.errChan:
+		return err
+
+	case <-i.quit:
+		return ErrShuttingDown
+	}
+}
+
+func (i *InvoiceRegistry) CancelInvoice(
+	hash lntypes.Hash) error {
+
+	i.logger.Debugw("New cancel request received", "hash", hash)
+
+	request := &invoiceRequest{
+		hash:    hash,
+		errChan: make(chan error),
+	}
+
+	select {
+	case i.cancelChan <- request:
+
+	case <-i.quit:
+		return ErrShuttingDown
+	}
+
+	select {
+	case err := <-request.errChan:
+		return err
+
+	case <-i.quit:
+		return ErrShuttingDown
+	}
 }
 
 // tickAt returns a channel that ticks at the specified time. If the time has
@@ -163,52 +310,331 @@ func (i *InvoiceRegistry) tickAt(t time.Time) <-chan time.Time {
 // invoiceEventLoop is the dedicated goroutine responsible for accepting
 // new notification subscriptions, cancelling old subscriptions, and
 // dispatching new invoice events.
-func (i *InvoiceRegistry) invoiceEventLoop() {
-	defer i.wg.Done()
-
+func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 	for {
 		// If there is something to release, set up a release tick
 		// channel.
-		var nextReleaseTick <-chan time.Time
+		var nextHtlcReleaseTick <-chan time.Time
 		if i.autoReleaseHeap.Len() > 0 {
-			head := i.autoReleaseHeap.Top().(*htlcReleaseEvent)
-			nextReleaseTick = i.tickAt(head.releaseTime)
+			head := i.autoReleaseHeap.Top().(releaseEvent)
+			nextHtlcReleaseTick = i.tickAt(head.getReleaseTime())
+
+			i.logger.Debugw("Next release", "time", head.getReleaseTime())
 		}
 
 		select {
 
 		// The htlc at the top of the heap needs to be auto-released.
-		case <-nextReleaseTick:
-			event := i.autoReleaseHeap.Pop().(*htlcReleaseEvent)
-			err := i.cancelSingleHtlc(
-				event.hash, event.key, ResultMppTimeout,
-			)
-			if err != nil {
-				i.logger.Errorf("HTLC timer: %v", err)
+		case <-nextHtlcReleaseTick:
+			head := i.autoReleaseHeap.Pop()
+
+			i.logger.Debugw("Release tick",
+				"time", head.(releaseEvent).getReleaseTime())
+
+			switch event := head.(type) {
+			case *htlcReleaseEvent:
+				err := i.cancelSingleHtlc(
+					event.hash, event.key, ResultMppTimeout,
+				)
+				if err != nil {
+					i.logger.Errorf("HTLC timer: %v", err)
+				}
+
+			case *invoiceExpiredEvent:
+				err := i.failInvoice(
+					ctx, event.hash, persistence.CancelledReasonExpired,
+				)
+				if err != nil {
+					return err
+				}
+
+			case *acceptTimeoutEvent:
+				err := i.failInvoice(
+					ctx, event.hash, persistence.CancelledReasonAcceptTimeout,
+				)
+				if err != nil {
+					return err
+				}
 			}
 
 		case htlc := <-i.htlcChan:
-			err := i.process(context.TODO(), htlc)
+			err := i.process(ctx, htlc)
 			if err != nil {
 				i.logger.Errorf("Process: %v", err)
 			}
 
+		case invoice := <-i.newInvoiceChan:
+			err := i.cdb.Add(ctx, invoice)
+			if err != nil {
+				return err
+			}
+
+			hash := invoice.PaymentPreimage.Hash()
+
+			i.logger.Debugw("New invoice",
+				"hash", hash, "amt", invoice.Value)
+
+			state := &invoiceState{
+				invoice:       &invoice.InvoiceCreationData,
+				acceptedHtlcs: make(map[types.CircuitKey]*InvoiceHTLC),
+			}
+
+			i.invoices[hash] = state
+
+			// Notify subscriber of new invoice.
+			i.subscriptionManager.notifySubscribers(hash, InvoiceUpdate{
+				State: persistence.InvoiceStateOpen,
+			})
+
+			i.startInvoiceExpireTimer(hash, invoice.ExpiresAt)
+
+		case newSubscription := <-i.newInvoiceSubscription:
+			if err := i.addSubscriber(ctx, newSubscription); err != nil {
+				return err
+			}
+
+		case request := <-i.cancelInvoiceSubscription:
+			i.subscriptionManager.deleteSubscription(request.hash, request.id)
+
+		case req := <-i.settleChan:
+			// Retrieve invoice.
+			state, ok := i.invoices[req.hash]
+			if !ok {
+				select {
+				case req.errChan <- errors.New("invoice not found"):
+				case <-ctx.Done():
+					return nil
+				}
+
+				break
+			}
+
+			// Store settle request in database.
+			err := i.requestSettle(ctx, state)
+			select {
+			case req.errChan <- err:
+			case <-i.quit:
+				return nil
+			}
+			if err != nil {
+				i.logger.Debugw("Settle request error", "err", err)
+
+				break
+			}
+
+			// Delete in-memory record for this invoice. Only open invoices are
+			// kept in memory.
+			delete(i.invoices, req.hash)
+
+			// Notify subscribers that the htlcs should be settled
+			// with our peer.
+			for key := range state.acceptedHtlcs {
+				htlcSettleResolution := NewSettleResolution(
+					state.invoice.PaymentPreimage, ResultSettled,
+				)
+				i.notifyHodlSubscribers(key, htlcSettleResolution)
+			}
+
+			// TODO: Wait for final settle event from lnd. Unfortunately this
+			// event is not yet implemented.
+
+			// Mark invoice as settled.
+			if err := i.cdb.Settle(ctx, req.hash); err != nil {
+				return errors.New("cannot settle invoice in database")
+			}
+
+			// Notify subscriber of settled invoice.
+			i.subscriptionManager.notifySubscribers(
+				req.hash,
+				InvoiceUpdate{
+					State: persistence.InvoiceStateSettled,
+				},
+			)
+
+		case req := <-i.cancelChan:
+			// Retrieve invoice.
+			state, ok := i.invoices[req.hash]
+			if !ok {
+				select {
+				case req.errChan <- errors.New("invoice not found"):
+				case <-ctx.Done():
+					return nil
+				}
+
+				break
+			}
+
+			// Mark invoice as failed.
+			if err := i.cdb.Fail(ctx, req.hash, persistence.CancelledReasonExternal); err != nil {
+				return errors.New("cannot fail invoice in database")
+			}
+
+			// Delete in-memory record for this invoice. Only open invoices are
+			// kept in memory.
+			delete(i.invoices, req.hash)
+
+			// Notify subscribers that the htlcs should be settled
+			// with our peer.
+			for key := range state.acceptedHtlcs {
+				resolution := NewFailResolution(
+					ResultInvoiceNotOpen,
+				)
+				i.notifyHodlSubscribers(key, resolution)
+			}
+
+			// Notify subscriber of settled invoice.
+			i.subscriptionManager.notifySubscribers(
+				req.hash,
+				InvoiceUpdate{
+					State:           persistence.InvoiceStateCancelled,
+					CancelledReason: persistence.CancelledReasonExternal,
+				},
+			)
+
+			select {
+			case req.errChan <- nil:
+			case <-ctx.Done():
+				return nil
+			}
+
+		case <-ctx.Done():
+			return ctx.Err()
+
 		case <-i.quit:
-			return
+			return nil
 		}
 	}
+}
+
+func (i *InvoiceRegistry) addSubscriber(ctx context.Context,
+	newSubscription invoiceSubscription) error {
+
+	hash := newSubscription.hash
+
+	// Store subscriber for future updates.
+	i.subscriptionManager.addSubscription(
+		hash, newSubscription.id, newSubscription.callback,
+	)
+
+	// Send open or accepted invoice from memory.
+	var update InvoiceUpdate
+
+	invoiceState, ok := i.invoices[hash]
+	if ok {
+		update.State = persistence.InvoiceStateOpen
+		if len(invoiceState.acceptedHtlcs) > 0 {
+			update.State = persistence.InvoiceStateAccepted
+		}
+	} else {
+		// Send other states from database.
+		invoice, _, err := i.cdb.Get(ctx, hash)
+		switch {
+		case err == types.ErrInvoiceNotFound:
+			i.logger.Debugw("No initial state to send",
+				"hash", hash, "id", newSubscription.id)
+
+			return nil
+
+		case err != nil:
+			return err
+		}
+
+		update.State = invoice.State
+		update.CancelledReason = invoice.CancelledReason
+	}
+
+	newSubscription.callback(update)
+
+	return nil
+}
+
+func (i *InvoiceRegistry) failInvoice(ctx context.Context,
+	hash lntypes.Hash, reason persistence.CancelledReason) error {
+
+	logger := i.logger.With("hash", hash)
+
+	// Retrieve invoice.
+	state, ok := i.invoices[hash]
+	if !ok {
+		logger.Debugw("Invoice to fail no longer open/accepted")
+
+		return nil
+	}
+
+	// Don't expire invoices that are already accepted.
+	setComplete := state.totalSetAmt() == int(state.invoice.Value)
+	if reason == persistence.CancelledReasonExpired && setComplete {
+		return nil
+	}
+
+	// Cancel all accepted htlcs.
+	for key := range state.acceptedHtlcs {
+		i.notifyHodlSubscribers(key, NewFailResolution(ResultInvoiceExpired))
+	}
+
+	// Mark invoice as expired in the database.
+	err := i.cdb.Fail(ctx, hash, reason)
+	if err != nil {
+		return err
+	}
+
+	// Remove from memory because invoice is no longer open.
+	delete(i.invoices, hash)
+
+	// Notify subscriber.
+	i.subscriptionManager.notifySubscribers(hash, InvoiceUpdate{
+		State:           persistence.InvoiceStateCancelled,
+		CancelledReason: reason,
+	})
+
+	logger.Infow("Failed invoice")
+
+	return nil
+}
+
+func (i *InvoiceRegistry) startInvoiceExpireTimer(hash lntypes.Hash,
+	releaseTime time.Time) {
+
+	event := &invoiceExpiredEvent{
+		eventBase: eventBase{
+			hash:        hash,
+			releaseTime: releaseTime,
+		},
+	}
+
+	i.logger.Debugw("Scheduling auto-release for invoice",
+		"hash", hash, "releaseTime", releaseTime)
+
+	i.autoReleaseHeap.Push(event)
+}
+
+func (i *InvoiceRegistry) startAcceptTimer(hash lntypes.Hash) {
+	releaseTime := time.Now().Add(i.cfg.AcceptTimeout)
+	event := &acceptTimeoutEvent{
+		eventBase: eventBase{
+			hash:        hash,
+			releaseTime: releaseTime,
+		},
+	}
+
+	i.logger.Debugw("Scheduling auto-release for invoice accept",
+		"hash", hash, "releaseTime", releaseTime)
+
+	i.autoReleaseHeap.Push(event)
 }
 
 // startHtlcTimer starts a new timer via the invoice registry main loop that
 // cancels a single htlc on an invoice when the htlc hold duration has passed.
 func (i *InvoiceRegistry) startHtlcTimer(hash lntypes.Hash,
-	key CircuitKey, acceptTime time.Time) {
+	key types.CircuitKey, acceptTime time.Time) {
 
 	releaseTime := acceptTime.Add(i.cfg.HtlcHoldDuration)
 	event := &htlcReleaseEvent{
-		hash:        hash,
-		key:         key,
-		releaseTime: releaseTime,
+		eventBase: eventBase{
+			hash:        hash,
+			releaseTime: releaseTime,
+		},
+		key: key,
 	}
 
 	i.logger.Debugf("Scheduling auto-release for htlc: "+
@@ -226,11 +652,17 @@ func (i *InvoiceRegistry) startHtlcTimer(hash lntypes.Hash,
 // a resolution result which will be used to notify subscribed links and
 // resolvers of the details of the htlc cancellation.
 func (i *InvoiceRegistry) cancelSingleHtlc(hash lntypes.Hash,
-	key CircuitKey, result FailResolutionResult) error {
+	key types.CircuitKey, result FailResolutionResult) error {
 
 	// Do nothing if the invoice has already been settled.
 	invoice, ok := i.invoices[hash]
 	if !ok {
+		return nil
+	}
+
+	// Do nothing if the set is already complete.
+	setComplete := invoice.totalSetAmt() == int(invoice.invoice.Value)
+	if setComplete {
 		return nil
 	}
 
@@ -244,11 +676,6 @@ func (i *InvoiceRegistry) cancelSingleHtlc(hash lntypes.Hash,
 		key, hash)
 
 	delete(invoice.acceptedHtlcs, key)
-
-	// Purge invoice from memory if there a no more pending htlcs.
-	if len(invoice.acceptedHtlcs) == 0 {
-		delete(i.invoices, hash)
-	}
 
 	i.notifyHodlSubscribers(key, NewFailResolution(result))
 
@@ -282,7 +709,7 @@ type registryHtlc struct {
 	amtPaid       lnwire.MilliSatoshi
 	expiry        uint32
 	currentHeight int32
-	circuitKey    CircuitKey
+	circuitKey    types.CircuitKey
 	payload       Payload
 	resolve       func(HtlcResolution)
 }
@@ -300,9 +727,11 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 
 	state, ok := i.invoices[h.rHash]
 	if !ok {
+		// Invoice is not present in memory. Do a db lookup to see if this
+		// happens to be a previously settled invoice.
 		dbInvoice, htlcs, err := i.cdb.Get(ctx, h.rHash)
 		switch {
-		case err == ErrInvoiceNotFound:
+		case err == types.ErrInvoiceNotFound:
 			// If the invoice was not found, return a failure
 			// resolution with an invoice not found result.
 			h.resolve(NewFailResolution(ResultInvoiceNotFound))
@@ -313,40 +742,46 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 			return err
 		}
 
-		i.logger.Debugw("Loaded invoice from db", "hash", h.rHash)
+		// Fail htlcs paying to unpayable invoices (expired or cancelled).
+		if dbInvoice.State != persistence.InvoiceStateSettleRequested &&
+			dbInvoice.State != persistence.InvoiceStateSettled {
+
+			h.resolve(NewFailResolution(ResultInvoiceNotFound))
+
+			return nil
+		}
+
+		i.logger.Debugw("Loaded settled invoice from db", "hash", h.rHash)
 
 		// Handle replays to a settled invoice.
-		if len(htlcs) > 0 {
-			// If this htlc was used for settling the invoice,
-			// resolve to settled again.
-			if _, ok := htlcs[h.circuitKey]; ok {
-				h.resolve(NewSettleResolution(
-					dbInvoice.PaymentPreimage,
-					ResultReplayToSettled,
-				))
+		if len(htlcs) == 0 {
+			return errors.New("unexpected unsettled invoice")
+		}
 
-				return nil
-			}
-
-			// Otherwise fail the htlc.
-			h.resolve(NewFailResolution(ResultInvoiceNotOpen))
+		// If this htlc was used for settling the invoice,
+		// resolve to settled again.
+		if _, ok := htlcs[h.circuitKey]; ok {
+			h.resolve(NewSettleResolution(
+				dbInvoice.PaymentPreimage,
+				ResultReplayToSettled,
+			))
 
 			return nil
 		}
 
-		state = &invoiceState{
-			invoice:       dbInvoice,
-			acceptedHtlcs: make(map[CircuitKey]*InvoiceHTLC),
-		}
-	} else {
-		if _, ok := state.acceptedHtlcs[h.circuitKey]; ok {
-			i.logger.Debugf("Htlc re-accepted: hash=%v, amt=%v, expiry=%v, circuit=%v, mpp=%v",
-				h.rHash, h.amtPaid, h.expiry, h.circuitKey, mpp)
+		// Otherwise fail the htlc.
+		h.resolve(NewFailResolution(ResultInvoiceNotOpen))
 
-			i.hodlSubscribe(h.resolve, h.circuitKey)
+		return nil
+	}
 
-			return nil
-		}
+	if _, ok := state.acceptedHtlcs[h.circuitKey]; ok {
+		i.logger.Debugf("Htlc re-accepted: hash=%v, amt=%v, expiry=%v, circuit=%v, mpp=%v",
+			h.rHash, h.amtPaid, h.expiry, h.circuitKey, mpp)
+
+		i.hodlSubscribe(h.resolve, h.circuitKey)
+
+		return nil
 	}
 
 	inv := state.invoice
@@ -433,10 +868,6 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	// If the invoice cannot be settled yet, only record the htlc.
 	setComplete := newSetTotal == mpp.TotalMsat()
 	if !setComplete {
-		// Store invoice in-memory until settled. Don't do this sooner,
-		// because otherwise a memory leak may occur.
-		i.invoices[h.rHash] = state
-
 		i.startHtlcTimer(
 			h.rHash, h.circuitKey, time.Now(),
 		)
@@ -444,54 +875,64 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		return nil
 	}
 
-	htlcMap := make(map[CircuitKey]int64)
+	i.startAcceptTimer(h.rHash)
+
+	// Notify subscriber of accepted invoice.
+	i.subscriptionManager.notifySubscribers(h.rHash, InvoiceUpdate{
+		State: persistence.InvoiceStateAccepted,
+	})
+
+	return nil
+}
+
+type InvoiceUpdate struct {
+	State           persistence.InvoiceState
+	CancelledReason persistence.CancelledReason
+}
+
+func (i *InvoiceRegistry) requestSettle(ctx context.Context,
+	state *invoiceState) error {
+
+	hash := state.invoice.PaymentPreimage.Hash()
+
+	// Check whether the set is still complete.
+	var setTotal lnwire.MilliSatoshi
+	for _, htlc := range state.acceptedHtlcs {
+		setTotal += htlc.Amt
+	}
+	if setTotal != state.invoice.Value {
+		i.logger.Infow("Set no longer complete",
+			"setTotal", setTotal,
+			"invoiceValue", state.invoice.Value)
+
+		return errors.New("set no longer complete")
+	}
+
+	// Store settle request in database. This is important to prevent partial
+	// settles after a restart.
+	htlcMap := make(map[types.CircuitKey]int64)
 	for key, htlc := range state.acceptedHtlcs {
 		htlcMap[key] = int64(htlc.Amt)
 	}
 
-	err := i.cdb.Settle(ctx, h.rHash, htlcMap)
+	err := i.cdb.RequestSettle(
+		ctx, hash, htlcMap,
+	)
 	if err != nil {
-		i.logger.Debugw("Cannot settle", "err", err)
-
-		// Cancel all htlcs.
-		for key := range state.acceptedHtlcs {
-			i.notifyHodlSubscribers(
-				key, NewFailResolution(ResultCannotSettle),
-			)
-		}
-
-		delete(i.invoices, h.rHash)
-
-		return nil
+		return errors.New("cannot settle invoice in database")
 	}
 
-	// Also settle any previously accepted htlcs. If a htlc is
-	// marked as settled, we should follow now and settle the htlc
-	// with our peer.
-	for key := range state.acceptedHtlcs {
-		// Notify subscribers that the htlcs should be settled
-		// with our peer. Note that the outcome of the
-		// resolution is set based on the outcome of the single
-		// htlc that we just settled, so may not be accurate
-		// for all htlcs.
-		htlcSettleResolution := NewSettleResolution(
-			inv.PaymentPreimage, ResultSettled,
-		)
-
-		// Notify subscribers that the htlc should be settled
-		// with our peer.
-		i.notifyHodlSubscribers(key, htlcSettleResolution)
-	}
-
-	// Delete in-memory record for this invoice.
-	delete(i.invoices, h.rHash)
+	// Notify subscriber of settle request.
+	i.subscriptionManager.notifySubscribers(hash, InvoiceUpdate{
+		State: persistence.InvoiceStateSettleRequested,
+	})
 
 	return nil
 }
 
 // notifyHodlSubscribers sends out the htlc resolution to all current
 // subscribers.
-func (i *InvoiceRegistry) notifyHodlSubscribers(key CircuitKey,
+func (i *InvoiceRegistry) notifyHodlSubscribers(key types.CircuitKey,
 	htlcResolution HtlcResolution) {
 
 	subscribers, ok := i.hodlSubscriptions[key]
@@ -511,7 +952,7 @@ func (i *InvoiceRegistry) notifyHodlSubscribers(key CircuitKey,
 
 // hodlSubscribe adds a new invoice subscription.
 func (i *InvoiceRegistry) hodlSubscribe(subscriber func(HtlcResolution),
-	circuitKey CircuitKey) {
+	circuitKey types.CircuitKey) {
 
 	i.logger.Debugf("Hodl subscribe for %v", circuitKey)
 

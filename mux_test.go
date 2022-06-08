@@ -3,17 +3,17 @@ package lnmux
 import (
 	"bytes"
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/go-pg/pg/v10"
 	"github.com/golang/mock/gomock"
 	sphinx "github.com/lightningnetwork/lightning-onion"
+	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/lnrpc/chainrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
-	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/record"
 	"github.com/lightningnetwork/lnd/routing/route"
 	"github.com/stretchr/testify/require"
@@ -21,6 +21,8 @@ import (
 
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
+	"github.com/bottlepay/lnmux/persistence"
+	"github.com/bottlepay/lnmux/persistence/test"
 )
 
 var (
@@ -79,7 +81,8 @@ func TestMux(t *testing.T) {
 
 	activeNetParams := &chaincfg.RegressionNetParams
 
-	db := &MockInvoiceDb{}
+	pg, db := setupTestDB(t)
+	defer pg.Close()
 
 	creator, err := NewInvoiceCreator(
 		&InvoiceCreatorConfig{
@@ -90,20 +93,31 @@ func TestMux(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	invoice, hash, err := creator.Create(10000, time.Minute, "test", 40)
+	invoice, testPreimage, err := creator.Create(
+		10000, time.Minute, "test", nil, 40,
+	)
 	require.NoError(t, err)
 	require.NotNil(t, invoice)
 
-	// Store invoice.
-	db.Invoice = &invoice.InvoiceCreationData
-	db.Hash = hash
+	testHash := testPreimage.Hash()
+
+	registry := NewRegistry(
+		db,
+		&RegistryConfig{
+			Clock:                clock.NewDefaultClock(),
+			FinalCltvRejectDelta: 10,
+			HtlcHoldDuration:     time.Second,
+			AcceptTimeout:        time.Second * 2,
+			Logger:               logger.Sugar(),
+		},
+	)
 
 	mux, err := New(&MuxConfig{
 		KeyRing:         keyRing,
 		ActiveNetParams: activeNetParams,
 		Lnd:             []lnd.LndClient{lndClient1, lndClient2},
-		ChannelDb:       db,
 		Logger:          logger.Sugar(),
+		Registry:        registry,
 	})
 	require.NoError(t, err)
 
@@ -115,32 +129,61 @@ func TestMux(t *testing.T) {
 		errChan <- mux.Run(ctx)
 	}()
 
+	// Store invoice.
+	require.NoError(t, registry.NewInvoice(&persistence.InvoiceCreationData{
+		ExpiresAt:           time.Now().Add(time.Minute),
+		InvoiceCreationData: invoice.InvoiceCreationData,
+		CreatedAt:           time.Now(),
+		PaymentRequest:      "payreq",
+		ID:                  1,
+	}))
+
+	var updateChan = make(chan InvoiceUpdate, 1)
+	cancelSubscription, err := registry.Subscribe(testHash, func(update InvoiceUpdate) {
+		logger.Sugar().Infow("Payment received", "state", update.State)
+
+		updateChan <- update
+	})
+	require.NoError(t, err)
+	expectUpdate := func(state persistence.InvoiceState) {
+		t.Helper()
+
+		update := <-updateChan
+		require.Equal(t, state, update.State)
+	}
+
+	expectUpdate(persistence.InvoiceStateOpen)
+
 	// Send initial block heights.
 	blockChan1 <- &chainrpc.BlockEpoch{Height: 1000}
 	blockChan2 <- &chainrpc.BlockEpoch{Height: 1000}
 
 	// Generate data for test htlc.
-	var testHash = lntypes.Hash{1, 2, 3}
-
 	dest, err := route.NewVertexFromBytes(keyRing.pubKey.SerializeCompressed())
 	require.NoError(t, err)
 
-	route := &route.Route{
-		Hops: []*route.Hop{
-			{
-				PubKeyBytes: dest,
-				MPP: record.NewMPP(
-					10000, invoice.PaymentAddr,
-				),
+	genOnion := func() []byte {
+		route := &route.Route{
+			Hops: []*route.Hop{
+				{
+					PubKeyBytes: dest,
+					MPP: record.NewMPP(
+						invoice.Value, invoice.PaymentAddr,
+					),
+				},
 			},
-		},
+		}
+
+		sessionKey, err := btcec.NewPrivateKey()
+		require.NoError(t, err)
+
+		onionBlob, err := generateSphinxPacket(route, testHash[:], sessionKey)
+		require.NoError(t, err)
+
+		return onionBlob
 	}
 
-	sessionKey, err := btcec.NewPrivateKey()
-	require.NoError(t, err)
-
-	onionBlob, err := generateSphinxPacket(route, testHash[:], sessionKey)
-	require.NoError(t, err)
+	onionBlob := genOnion()
 
 	receiveHtlc := func(htlcID uint64, amt int64) *routerrpc.ForwardHtlcInterceptRequest {
 		return &routerrpc.ForwardHtlcInterceptRequest{
@@ -157,16 +200,13 @@ func TestMux(t *testing.T) {
 	expectResponse := func(resp *routerrpc.ForwardHtlcInterceptResponse,
 		expectedAction routerrpc.ResolveHoldForwardAction) {
 
+		t.Helper()
+
 		require.Equal(t, expectedAction, resp.Action)
 	}
 
-	// Test settle error.
-	db.SettleErr = errors.New("settle error")
-	htlcChan1 <- receiveHtlc(0, 10000)
-	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_FAIL)
-
 	// Notify arrival of part 1.
-	db.SettleErr = nil
+	// db.SettleErr = nil
 	htlcChan1 <- receiveHtlc(0, 6000)
 
 	// Replay arrival of part 1.
@@ -182,11 +222,19 @@ func TestMux(t *testing.T) {
 	// Notify arrival of part 2.
 	htlcChan2 <- receiveHtlc(2, 4000)
 
-	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_SETTLE)
+	expectUpdate(persistence.InvoiceStateAccepted)
+	require.NoError(t, registry.RequestSettle(testHash))
 
+	expectUpdate(persistence.InvoiceStateSettleRequested)
+
+	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_SETTLE)
 	expectResponse(<-responseChan2, routerrpc.ResolveHoldForwardAction_SETTLE)
 
-	require.NotEmpty(t, db.Htlcs)
+	expectUpdate(persistence.InvoiceStateSettled)
+
+	_, htlcs, err := db.Get(context.Background(), testHash)
+	require.NoError(t, err)
+	require.NotEmpty(t, htlcs)
 
 	// Replay settled htlc.
 	htlcChan1 <- receiveHtlc(1, 6000)
@@ -195,6 +243,50 @@ func TestMux(t *testing.T) {
 	// New payment to settled invoice
 	htlcChan1 <- receiveHtlc(10, 10000)
 	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_FAIL)
+
+	cancelSubscription()
+
+	// Create a new invoice.
+	invoice, testPreimage, err = creator.Create(
+		15000, time.Minute, "test 2", nil, 40,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, invoice)
+
+	testHash = testPreimage.Hash()
+
+	cancelSubscription, err = registry.Subscribe(testHash, func(update InvoiceUpdate) {
+		logger.Sugar().Infow("Payment received", "state", update.State)
+
+		updateChan <- update
+	})
+	require.NoError(t, err)
+
+	// Store invoice.
+	require.NoError(t, registry.NewInvoice(&persistence.InvoiceCreationData{
+		InvoiceCreationData: invoice.InvoiceCreationData,
+		CreatedAt:           time.Now(),
+		PaymentRequest:      "payreq",
+		ID:                  2,
+		ExpiresAt:           time.Now().Add(time.Minute),
+	}))
+	expectUpdate(persistence.InvoiceStateOpen)
+
+	// Regenerate onion blob for new hash.
+	onionBlob = genOnion()
+
+	htlcChan1 <- receiveHtlc(20, 15000)
+
+	expectUpdate(persistence.InvoiceStateAccepted)
+	require.NoError(t, registry.RequestSettle(testHash))
+
+	expectUpdate(persistence.InvoiceStateSettleRequested)
+
+	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_SETTLE)
+
+	expectUpdate(persistence.InvoiceStateSettled)
+
+	cancelSubscription()
 
 	cancel()
 	require.NoError(t, <-errChan)
@@ -234,4 +326,16 @@ func generateSphinxPacket(rt *route.Route, paymentHash []byte,
 	}
 
 	return onionBlob.Bytes(), nil
+}
+
+func setupTestDB(t *testing.T) (*pg.DB, *persistence.PostgresPersister) {
+	conn, dsn := test.ResetPGTestDB(t, &test.TestDBSettings{
+		MigrationsPath: "./persistence/migrations",
+	})
+
+	log := zap.NewNop().Sugar()
+	db, err := persistence.NewPostgresPersisterFromDSN(dsn, log)
+	require.NoError(t, err)
+
+	return conn, db
 }
