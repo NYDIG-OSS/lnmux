@@ -72,6 +72,7 @@ type InvoiceCallback func(update InvoiceUpdate)
 type invoiceState struct {
 	invoice       *types.InvoiceCreationData
 	acceptedHtlcs map[types.CircuitKey]*InvoiceHTLC
+	autoSettle    bool
 }
 
 func (i *invoiceState) totalSetAmt() int {
@@ -186,6 +187,7 @@ func (i *InvoiceRegistry) Run(ctx context.Context) error {
 		state := &invoiceState{
 			invoice:       &invoice.InvoiceCreationData.InvoiceCreationData,
 			acceptedHtlcs: make(map[types.CircuitKey]*InvoiceHTLC),
+			autoSettle:    invoice.AutoSettle,
 		}
 
 		hash := invoice.PaymentPreimage.Hash()
@@ -253,7 +255,6 @@ func (i *InvoiceRegistry) NewInvoice(invoice *persistence.InvoiceCreationData) e
 }
 
 func (i *InvoiceRegistry) RequestSettle(hash lntypes.Hash) error {
-
 	i.logger.Debugw("New settle request received", "hash", hash)
 
 	request := &invoiceRequest{
@@ -381,6 +382,7 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			state := &invoiceState{
 				invoice:       &invoice.InvoiceCreationData,
 				acceptedHtlcs: make(map[types.CircuitKey]*InvoiceHTLC),
+				autoSettle:    invoice.AutoSettle,
 			}
 
 			i.invoices[hash] = state
@@ -409,6 +411,16 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			state, ok := i.invoices[req.hash]
 			if !ok {
 				if err := sendResponse(ErrInvoiceNotFound); err != nil {
+					return err
+				}
+
+				break
+			}
+
+			// Don't allow external settles on auto-settling invoices.
+			if state.autoSettle {
+				err := sendResponse(errors.New("invoice is auto-settling"))
+				if err != nil {
 					return err
 				}
 
@@ -876,6 +888,19 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	i.subscriptionManager.notifySubscribers(h.rHash, InvoiceUpdate{
 		State: persistence.InvoiceStateAccepted,
 	})
+
+	// Auto-settle invoice if specified.
+	if state.autoSettle {
+		i.logger.Debugw("Auto-settling", "hash", h.rHash)
+
+		if err := i.markSettleRequested(ctx, state); err != nil {
+			return err
+		}
+
+		if err := i.requestSettle(ctx, state); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

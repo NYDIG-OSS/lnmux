@@ -12,6 +12,7 @@ import (
 	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/lightningnetwork/lnd/record"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -91,7 +92,7 @@ func (r *registryTestContext) payAddr(id int) lntypes.Preimage {
 	return [32]byte{0, byte(id)}
 }
 
-func (r *registryTestContext) addInvoice(id int, expiry time.Duration) {
+func (r *registryTestContext) addInvoice(id int, expiry time.Duration, autoSettle bool) {
 	preimage := r.preimage(id)
 	payAddr := r.payAddr(id)
 
@@ -106,6 +107,7 @@ func (r *registryTestContext) addInvoice(id int, expiry time.Duration) {
 		CreatedAt:      time.Now(),
 		PaymentRequest: "payreq",
 		ID:             int64(id),
+		AutoSettle:     autoSettle,
 	}))
 }
 
@@ -130,7 +132,7 @@ func TestInvoiceExpiry(t *testing.T) {
 	updateChan1, cancel1 := c.subscribe(1)
 
 	// Add invoice.
-	c.addInvoice(1, time.Second)
+	c.addInvoice(1, time.Second, false)
 
 	// Expect an open notification.
 	update := <-updateChan1
@@ -144,7 +146,7 @@ func TestInvoiceExpiry(t *testing.T) {
 	cancel1()
 
 	// Add another invoice.
-	c.addInvoice(2, time.Second)
+	c.addInvoice(2, time.Second, false)
 
 	// Expect the open update.
 	updateChan2, cancel2 := c.subscribe(2)
@@ -172,4 +174,58 @@ func TestInvoiceExpiry(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 	cancel3()
+}
+
+func TestAutoSettle(t *testing.T) {
+	defer test.Timeout()()
+
+	c := newRegistryTestContext(t)
+
+	// Subscribe to updates for invoice 1.
+	updateChan, cancelUpdates := c.subscribe(1)
+
+	// Add invoice.
+	c.addInvoice(1, time.Hour, true)
+
+	// Expect an open notification.
+	update := <-updateChan
+	require.Equal(t, persistence.InvoiceStateOpen, update.State)
+
+	preimage := c.preimage(1)
+	resolved := make(chan struct{})
+	c.registry.NotifyExitHopHtlc(&registryHtlc{
+		rHash:         preimage.Hash(),
+		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
+		expiry:        100,
+		currentHeight: 0,
+		resolve: func(r HtlcResolution) {
+			close(resolved)
+		},
+		payload: &testPayload{
+			amt:     lnwire.MilliSatoshi(c.testAmt),
+			payAddr: c.payAddr(1),
+		},
+	})
+
+	update = <-updateChan
+	require.Equal(t, persistence.InvoiceStateAccepted, update.State)
+
+	update = <-updateChan
+	require.Equal(t, persistence.InvoiceStateSettleRequested, update.State)
+
+	update = <-updateChan
+	require.Equal(t, persistence.InvoiceStateSettled, update.State)
+
+	<-resolved
+
+	cancelUpdates()
+}
+
+type testPayload struct {
+	amt     lnwire.MilliSatoshi
+	payAddr [32]byte
+}
+
+func (t *testPayload) MultiPath() *record.MPP {
+	return record.NewMPP(t.amt, t.payAddr)
 }
