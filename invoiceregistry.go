@@ -30,6 +30,10 @@ var (
 	// ErrShuttingDown is returned when an operation failed because the
 	// invoice registry is shutting down.
 	ErrShuttingDown = errors.New("invoice registry shutting down")
+
+	// ErrInvoiceNotFound is returned when the invoice is unknown to the invoice
+	// registry.
+	ErrInvoiceNotFound = errors.New("invoice not found")
 )
 
 const (
@@ -397,13 +401,15 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			i.subscriptionManager.deleteSubscription(request.hash, request.id)
 
 		case req := <-i.settleChan:
+			sendResponse := func(err error) error {
+				return i.sendResponse(req.errChan, err)
+			}
+
 			// Retrieve invoice.
 			state, ok := i.invoices[req.hash]
 			if !ok {
-				select {
-				case req.errChan <- errors.New("invoice not found"):
-				case <-ctx.Done():
-					return nil
+				if err := sendResponse(ErrInvoiceNotFound); err != nil {
+					return err
 				}
 
 				break
@@ -411,11 +417,13 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 
 			// Store settle request in database.
 			err := i.markSettleRequested(ctx, state)
-			select {
-			case req.errChan <- err:
-			case <-i.quit:
-				return nil
+
+			// In both error and success cases, notify request thread of
+			// outcome.
+			if sendErr := sendResponse(err); sendErr != nil {
+				return sendErr
 			}
+
 			if err != nil {
 				i.logger.Debugw("Settle request error", "err", err)
 
@@ -432,10 +440,9 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			// Retrieve invoice.
 			state, ok := i.invoices[req.hash]
 			if !ok {
-				select {
-				case req.errChan <- errors.New("invoice not found"):
-				case <-ctx.Done():
-					return nil
+				err := i.sendResponse(req.errChan, ErrInvoiceNotFound)
+				if err != nil {
+					return err
 				}
 
 				break
@@ -468,10 +475,10 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 				},
 			)
 
-			select {
-			case req.errChan <- nil:
-			case <-ctx.Done():
-				return nil
+			// Send success response.
+			err := i.sendResponse(req.errChan, nil)
+			if err != nil {
+				return err
 			}
 
 		case <-ctx.Done():
@@ -480,6 +487,17 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 		case <-i.quit:
 			return nil
 		}
+	}
+}
+
+// sendResponse sends a result on a response channel.
+func (i *InvoiceRegistry) sendResponse(ch chan error, err error) error {
+	select {
+	case ch <- err:
+		return nil
+
+	case <-i.quit:
+		return ErrShuttingDown
 	}
 }
 
