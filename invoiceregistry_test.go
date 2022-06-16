@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bottlepay/lnmux/persistence"
+	"github.com/bottlepay/lnmux/test"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/go-pg/pg/v10"
 	"github.com/lightningnetwork/lnd/clock"
@@ -121,6 +122,8 @@ func (r *registryTestContext) subscribe(id int) (chan InvoiceUpdate, func()) {
 }
 
 func TestInvoiceExpiry(t *testing.T) {
+	defer test.Timeout()()
+
 	c := newRegistryTestContext(t)
 
 	// Subscribe to updates for invoice 1.
