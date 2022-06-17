@@ -42,8 +42,7 @@ message SubscribeSingleInvoiceResponse {
       STATE_ACCEPTED = 1;
       STATE_SETTLE_REQUESTED = 2;
       STATE_SETTLED = 3;
-      STATE_EXPIRED = 4;
-      STATE_CANCELLED = 5;
+      STATE_CANCELLED = 4;
     }
 
     enum CancelledReason {
