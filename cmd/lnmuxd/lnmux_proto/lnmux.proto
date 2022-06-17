@@ -19,6 +19,11 @@ message AddInvoiceRequest {
     string description = 2;
     bytes description_hash = 3;
     int64 expiry_secs = 4;
+
+    // If set to true, invoices will be settled automatically when a payment to
+    // it comes in. It is not necessary or possible to request settlement
+    // manually.
+    bool auto_settle = 5;
 }
 
 message AddInvoiceResponse {

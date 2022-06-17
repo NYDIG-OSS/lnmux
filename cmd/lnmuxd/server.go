@@ -187,6 +187,7 @@ func (s *server) AddInvoice(ctx context.Context,
 		ID:                  int64(rand.Int31()),
 		PaymentRequest:      invoice.PaymentRequest,
 		ExpiresAt:           expiryTime,
+		AutoSettle:          req.AutoSettle,
 	}
 
 	err = s.registry.NewInvoice(creationData)
