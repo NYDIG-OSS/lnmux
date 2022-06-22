@@ -261,8 +261,6 @@ func (m *SubscribeSingleInvoiceResponse) Validate() error {
 
 	// no validation rules for State
 
-	// no validation rules for CancelledReason
-
 	return nil
 }
 

@@ -16,9 +16,7 @@ import (
 type Invoice struct {
 	InvoiceCreationData
 
-	State           InvoiceState
-	CancelledReason CancelledReason
-
+	Settled           bool
 	SettledAt         time.Time
 	SettleRequestedAt time.Time
 }
@@ -26,66 +24,25 @@ type Invoice struct {
 type InvoiceState int
 
 const (
-	InvoiceStateOpen     InvoiceState = iota
-	InvoiceStateAccepted              // This state is not persisted in the database.
+	InvoiceStateAccepted InvoiceState = iota
 	InvoiceStateSettleRequested
 	InvoiceStateSettled
-	InvoiceStateCancelled
-)
-
-type CancelledReason int
-
-const (
-	CancelledReasonNone CancelledReason = iota
-	CancelledReasonExpired
-	CancelledReasonAcceptTimeout
-	CancelledReasonExternal
 )
 
 type InvoiceCreationData struct {
 	types.InvoiceCreationData
-
-	CreatedAt      time.Time
-	ExpiresAt      time.Time
-	ID             int64
-	PaymentRequest string
 }
-
-type dbInvoiceState string
-
-const (
-	dbInvoiceStateOpen            = dbInvoiceState("OPEN")
-	dbInvoiceStateSettleRequested = dbInvoiceState("SETTLE_REQUESTED")
-	dbInvoiceStateSettled         = dbInvoiceState("SETTLED")
-	dbInvoiceStateExpired         = dbInvoiceState("EXPIRED")
-	dbInvoiceStateCancelled       = dbInvoiceState("CANCELLED")
-)
-
-type dbCancelledReason string
-
-const (
-	dbCancelledReasonExpired       = dbCancelledReason("EXPIRED")
-	dbCancelledReasonAcceptTimeout = dbCancelledReason("ACCEPT_TIMEOUT")
-	dbCancelledReasonExternal      = dbCancelledReason("EXTERNAL")
-)
 
 type dbInvoice struct {
 	tableName struct{} `pg:"lnmux.invoices,discard_unknown_columns"` // nolint
 
 	Hash       lntypes.Hash     `pg:"hash"`
 	Preimage   lntypes.Preimage `pg:"preimage"`
-	CreatedAt  time.Time        `pg:"created_at"`
-	ExpiresAt  time.Time        `pg:"expires_at"`
 	AmountMsat int64            `pg:"amount_msat,use_zero"`
-	ID         int64            `pg:"id,use_zero"`
 
-	State             dbInvoiceState     `pg:"state"`
-	CancelledReason   *dbCancelledReason `pg:"cancelled_reason"`
-	SettledAt         time.Time          `pg:"settled_at"`
-	SettleRequestedAt time.Time          `pg:"settle_requested_at"`
-	FinalCltvDelta    int32              `pg:"final_cltv_delta,use_zero"`
-	PaymentAddr       [32]byte           `pg:"payment_addr"`
-	PaymentRequest    string             `pg:"payment_request"`
+	Settled           bool      `pg:"settled,use_zero"`
+	SettledAt         time.Time `pg:"settled_at"`
+	SettleRequestedAt time.Time `pg:"settle_requested_at"`
 }
 
 type dbHtlc struct {
@@ -119,84 +76,16 @@ func (p *PostgresPersister) Delete(ctx context.Context, hash lntypes.Hash) error
 	return nil
 }
 
-func unmarshallDbInvoiceState(state dbInvoiceState) InvoiceState {
-	switch state {
-	case dbInvoiceStateOpen:
-		return InvoiceStateOpen
-
-	case dbInvoiceStateSettleRequested:
-		return InvoiceStateSettleRequested
-
-	case dbInvoiceStateSettled:
-		return InvoiceStateSettled
-
-	case dbInvoiceStateCancelled:
-		return InvoiceStateCancelled
-
-	default:
-		panic("unknown invoice state")
-	}
-}
-
-func unmarshallDbCancelledReason(reason *dbCancelledReason) CancelledReason {
-	if reason == nil {
-		return CancelledReasonNone
-	}
-
-	switch *reason {
-	case dbCancelledReasonExpired:
-		return CancelledReasonExpired
-
-	case dbCancelledReasonAcceptTimeout:
-		return CancelledReasonAcceptTimeout
-
-	case dbCancelledReasonExternal:
-		return CancelledReasonExternal
-
-	default:
-		panic("unknown cancelled reason")
-	}
-}
-
-func marshallCancelledReason(reason CancelledReason) *dbCancelledReason {
-	var dbReason dbCancelledReason
-	switch reason {
-	case CancelledReasonNone:
-		return nil
-
-	case CancelledReasonExpired:
-		dbReason = dbCancelledReasonExpired
-
-	case CancelledReasonAcceptTimeout:
-		dbReason = dbCancelledReasonAcceptTimeout
-
-	case CancelledReasonExternal:
-		dbReason = dbCancelledReasonExternal
-
-	default:
-		panic("unknown cancelled reason")
-	}
-
-	return &dbReason
-}
-
 func unmarshallDbInvoice(invoice *dbInvoice) *Invoice {
 	return &Invoice{
 		InvoiceCreationData: InvoiceCreationData{
-			CreatedAt:      invoice.CreatedAt,
-			PaymentRequest: invoice.PaymentRequest,
 			InvoiceCreationData: types.InvoiceCreationData{
-				FinalCltvDelta:  invoice.FinalCltvDelta,
 				PaymentPreimage: invoice.Preimage,
 				Value:           lnwire.MilliSatoshi(invoice.AmountMsat),
-				PaymentAddr:     invoice.PaymentAddr,
 			},
-			ID:        invoice.ID,
-			ExpiresAt: invoice.ExpiresAt,
 		},
-		SettledAt:       invoice.SettledAt,
-		State:           unmarshallDbInvoiceState(invoice.State),
-		CancelledReason: unmarshallDbCancelledReason(invoice.CancelledReason),
+		SettledAt: invoice.SettledAt,
+		Settled:   invoice.Settled,
 	}
 }
 
@@ -234,46 +123,25 @@ func (p *PostgresPersister) Get(ctx context.Context, hash lntypes.Hash) (*Invoic
 	return invoice, htlcs, nil
 }
 
-func (p *PostgresPersister) GetOpen(ctx context.Context) ([]*Invoice,
-	error) {
-
-	var dbInvoices []dbInvoice
-	err := p.conn.ModelContext(ctx, &dbInvoices).
-		Where("state=?", dbInvoiceStateOpen).Select()
-
-	if err != nil {
-		return nil, err
-	}
-
-	var invoices []*Invoice
-	for _, dbInvoice := range dbInvoices {
-		invoice := unmarshallDbInvoice(&dbInvoice)
-		invoices = append(invoices, invoice)
-	}
-
-	return invoices, nil
-}
-
 func (p *PostgresPersister) RequestSettle(ctx context.Context,
-	hash lntypes.Hash, htlcs map[types.CircuitKey]int64) error {
+	invoice *InvoiceCreationData, htlcs map[types.CircuitKey]int64) error {
 
 	return p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
-		result, err := p.conn.ModelContext(ctx, &dbInvoice{}).
-			Set("state=?", dbInvoiceStateSettleRequested).
-			Set("settle_requested_at=?", time.Now().UTC()).
-			Where("hash=?", hash).
-			Where("state=?", dbInvoiceStateOpen).
-			Update()
-		if err != nil {
-			return fmt.Errorf("cannot request settle: %w", err)
+		dbInvoice := &dbInvoice{
+			Hash:              invoice.PaymentPreimage.Hash(),
+			Preimage:          invoice.PaymentPreimage,
+			AmountMsat:        int64(invoice.Value),
+			SettleRequestedAt: time.Now(),
 		}
-		if result.RowsAffected() == 0 {
-			return errors.New("cannot request settle")
+
+		_, err := p.conn.ModelContext(ctx, dbInvoice).Insert()
+		if err != nil {
+			return err
 		}
 
 		for key, amt := range htlcs {
 			dbHtlc := dbHtlc{
-				Hash:       hash,
+				Hash:       invoice.PaymentPreimage.Hash(),
 				ChanID:     key.ChanID,
 				HtlcID:     key.HtlcID,
 				AmountMsat: amt,
@@ -292,10 +160,10 @@ func (p *PostgresPersister) Settle(ctx context.Context,
 	hash lntypes.Hash) error {
 
 	result, err := p.conn.ModelContext(ctx, &dbInvoice{}).
-		Set("state=?", dbInvoiceStateSettled).
+		Set("settled=?", true).
 		Set("settled_at=?", time.Now().UTC()).
 		Where("hash=?", hash).
-		Where("state=?", dbInvoiceStateSettleRequested).
+		Where("settled=?", false).
 		Update()
 	if err != nil {
 		return fmt.Errorf("cannot settle invoice: %w", err)
@@ -305,49 +173,6 @@ func (p *PostgresPersister) Settle(ctx context.Context,
 	}
 
 	return nil
-}
-
-func (p *PostgresPersister) Fail(ctx context.Context,
-	hash lntypes.Hash, reason CancelledReason) error {
-
-	if reason == CancelledReasonNone {
-		return errors.New("no cancelled reason specified")
-	}
-
-	result, err := p.conn.ModelContext(ctx, &dbInvoice{}).
-		Set("state=?", dbInvoiceStateCancelled).
-		Set("settled_at=?", time.Now().UTC()).
-		Set("cancelled_reason=?", marshallCancelledReason(reason)).
-		Where("hash=?", hash).
-		Where("state=?", dbInvoiceStateOpen).
-		Update()
-	if err != nil {
-		return fmt.Errorf("cannot fail invoice: %w", err)
-	}
-	if result.RowsAffected() == 0 {
-		return errors.New("cannot fail invoice")
-	}
-
-	return nil
-}
-
-func (p *PostgresPersister) Add(ctx context.Context, invoice *InvoiceCreationData) error {
-	dbInvoice := &dbInvoice{
-		CreatedAt:      invoice.CreatedAt,
-		ExpiresAt:      invoice.ExpiresAt,
-		Hash:           invoice.PaymentPreimage.Hash(),
-		Preimage:       invoice.PaymentPreimage,
-		AmountMsat:     int64(invoice.Value),
-		FinalCltvDelta: invoice.FinalCltvDelta,
-		PaymentAddr:    invoice.PaymentAddr,
-		PaymentRequest: invoice.PaymentRequest,
-		ID:             invoice.ID,
-		State:          dbInvoiceStateOpen,
-	}
-
-	_, err := p.conn.ModelContext(ctx, dbInvoice).Insert()
-
-	return err
 }
 
 // Ping pings the database connection to ensure it is available

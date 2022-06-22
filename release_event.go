@@ -39,10 +39,6 @@ func (r *eventBase) Less(other queue.PriorityQueueItem) bool {
 	return r.getReleaseTime().Before(other.(releaseEvent).getReleaseTime())
 }
 
-type invoiceExpiredEvent struct {
-	eventBase
-}
-
 type acceptTimeoutEvent struct {
 	eventBase
 }

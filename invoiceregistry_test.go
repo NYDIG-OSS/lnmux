@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/persistence"
 	"github.com/bottlepay/lnmux/test"
-	"github.com/bottlepay/lnmux/types"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/go-pg/pg/v10"
 	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/lntypes"
@@ -28,6 +29,8 @@ type registryTestContext struct {
 	logger          *zap.SugaredLogger
 
 	testAmt int64
+
+	creator *InvoiceCreator
 }
 
 func newRegistryTestContext(t *testing.T, autoSettle bool) *registryTestContext {
@@ -35,12 +38,24 @@ func newRegistryTestContext(t *testing.T, autoSettle bool) *registryTestContext 
 
 	pg, db := setupTestDB(t)
 
+	keyRing := NewKeyRing(testKey)
+
+	creator, err := NewInvoiceCreator(
+		&InvoiceCreatorConfig{
+			KeyRing:         keyRing,
+			GwPubKeys:       []common.PubKey{testPubKey1, testPubKey2},
+			ActiveNetParams: &chaincfg.RegressionNetParams,
+		},
+	)
+	require.NoError(t, err)
+
 	cfg := &RegistryConfig{
 		Clock:                clock.NewDefaultClock(),
 		FinalCltvRejectDelta: 10,
 		HtlcHoldDuration:     time.Second,
 		AcceptTimeout:        time.Second * 2,
 		Logger:               logger.Sugar(),
+		PrivKey:              testKey,
 		AutoSettle:           autoSettle,
 	}
 
@@ -51,6 +66,7 @@ func newRegistryTestContext(t *testing.T, autoSettle bool) *registryTestContext 
 		db:      db,
 		logger:  cfg.Logger,
 		testAmt: 10000,
+		creator: creator,
 	}
 
 	c.start()
@@ -85,37 +101,18 @@ func (r *registryTestContext) close() {
 	r.pg.Close()
 }
 
-func (r *registryTestContext) preimage(id int) lntypes.Preimage {
-	return lntypes.Preimage{byte(id)}
+func (r *registryTestContext) createInvoice(id int, expiry time.Duration) (
+	*Invoice, lntypes.Preimage) {
+
+	invoice, preimage, err := r.creator.Create(r.testAmt, expiry, "test", nil, 40)
+	require.NoError(r.t, err)
+
+	return invoice, preimage
 }
 
-func (r *registryTestContext) payAddr(id int) lntypes.Preimage {
-	return [32]byte{0, byte(id)}
-}
-
-func (r *registryTestContext) addInvoice(id int, expiry time.Duration) {
-	preimage := r.preimage(id)
-	payAddr := r.payAddr(id)
-
-	require.NoError(r.t, r.registry.NewInvoice(&persistence.InvoiceCreationData{
-		ExpiresAt: time.Now().Add(expiry),
-		InvoiceCreationData: types.InvoiceCreationData{
-			FinalCltvDelta:  40,
-			PaymentPreimage: preimage,
-			Value:           lnwire.MilliSatoshi(r.testAmt),
-			PaymentAddr:     payAddr,
-		},
-		CreatedAt:      time.Now(),
-		PaymentRequest: "payreq",
-		ID:             int64(id),
-	}))
-}
-
-func (r *registryTestContext) subscribe(id int) (chan InvoiceUpdate, func()) {
-	preimage := r.preimage(id)
-
+func (r *registryTestContext) subscribe(hash lntypes.Hash) (chan InvoiceUpdate, func()) {
 	updateChan := make(chan InvoiceUpdate)
-	cancel, err := r.registry.Subscribe(preimage.Hash(), func(update InvoiceUpdate) {
+	cancel, err := r.registry.Subscribe(hash, func(update InvoiceUpdate) {
 		updateChan <- update
 	})
 	require.NoError(r.t, err)
@@ -128,52 +125,31 @@ func TestInvoiceExpiry(t *testing.T) {
 
 	c := newRegistryTestContext(t, false)
 
-	// Subscribe to updates for invoice 1.
-	updateChan1, cancel1 := c.subscribe(1)
-
 	// Add invoice.
-	c.addInvoice(1, time.Second)
-
-	// Expect an open notification.
-	update := <-updateChan1
-	require.Equal(t, persistence.InvoiceStateOpen, update.State)
-
-	// Expected an expired notification.
-	update = <-updateChan1
-	require.Equal(t, persistence.InvoiceStateCancelled, update.State)
-	require.Equal(t, persistence.CancelledReasonExpired, update.CancelledReason)
-
-	cancel1()
-
-	// Add another invoice.
-	c.addInvoice(2, time.Second)
-
-	// Expect the open update.
-	updateChan2, cancel2 := c.subscribe(2)
-	update = <-updateChan2
-	require.Equal(t, persistence.InvoiceStateOpen, update.State)
-	cancel2()
-
-	// Stop the registry.
-	c.stop()
+	invoice, preimage := c.createInvoice(1, 100*time.Millisecond)
 
 	// Wait for the invoice to expire.
-	time.Sleep(2 * time.Second)
+	time.Sleep(200 * time.Millisecond)
 
-	// Restart the registry.
-	c.start()
+	// Send htlc.
+	resolved := make(chan HtlcResolution)
+	c.registry.NotifyExitHopHtlc(&registryHtlc{
+		rHash:         preimage.Hash(),
+		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
+		expiry:        100,
+		currentHeight: 0,
+		resolve: func(r HtlcResolution) {
+			resolved <- r
+		},
+		payload: &testPayload{
+			amt:     lnwire.MilliSatoshi(c.testAmt),
+			payAddr: invoice.PaymentAddr,
+		},
+	})
 
-	// This should result in an immediate expiry of the invoice.
-	updateChan3, cancel3 := c.subscribe(2)
-
-	select {
-	case update := <-updateChan3:
-		require.Equal(t, persistence.InvoiceStateCancelled, update.State)
-		require.Equal(t, persistence.CancelledReasonExpired, update.CancelledReason)
-
-	case <-time.After(200 * time.Millisecond):
-	}
-	cancel3()
+	resolution := <-resolved
+	require.IsType(t, &HtlcFailResolution{}, resolution)
+	require.Equal(t, ResultInvoiceExpired, resolution.(*HtlcFailResolution).Outcome)
 }
 
 func TestAutoSettle(t *testing.T) {
@@ -181,17 +157,12 @@ func TestAutoSettle(t *testing.T) {
 
 	c := newRegistryTestContext(t, true)
 
-	// Subscribe to updates for invoice 1.
-	updateChan, cancelUpdates := c.subscribe(1)
-
 	// Add invoice.
-	c.addInvoice(1, time.Hour)
+	invoice, preimage := c.createInvoice(1, time.Hour)
 
-	// Expect an open notification.
-	update := <-updateChan
-	require.Equal(t, persistence.InvoiceStateOpen, update.State)
+	// Subscribe to updates for invoice.
+	updateChan, cancelUpdates := c.subscribe(preimage.Hash())
 
-	preimage := c.preimage(1)
 	resolved := make(chan struct{})
 	c.registry.NotifyExitHopHtlc(&registryHtlc{
 		rHash:         preimage.Hash(),
@@ -203,11 +174,11 @@ func TestAutoSettle(t *testing.T) {
 		},
 		payload: &testPayload{
 			amt:     lnwire.MilliSatoshi(c.testAmt),
-			payAddr: c.payAddr(1),
+			payAddr: invoice.PaymentAddr,
 		},
 	})
 
-	update = <-updateChan
+	update := <-updateChan
 	require.Equal(t, persistence.InvoiceStateAccepted, update.State)
 
 	update = <-updateChan

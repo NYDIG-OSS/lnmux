@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const testTimeout = 20 * time.Second
+const testTimeout = 30 * time.Second
 
 // Timeout implements a test level timeout.
 func Timeout() func() {

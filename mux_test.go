@@ -23,11 +23,19 @@ import (
 	"github.com/bottlepay/lnmux/lnd"
 	"github.com/bottlepay/lnmux/persistence"
 	"github.com/bottlepay/lnmux/persistence/test"
+	test_common "github.com/bottlepay/lnmux/test"
 )
 
 var (
 	testPubKey1, _ = common.NewPubKeyFromStr("02e1ce77dfdda9fd1cf5e9d796faf57d1cedef9803aec84a6d7f8487d32781341e")
 	testPubKey2, _ = common.NewPubKeyFromStr("0314aaf9b2547682b81977b3ac0c5585c3521a0a5430fb410cb572d5c72364edf3")
+
+	testKey = [32]byte{
+		0x81, 0xb6, 0x37, 0xd8, 0xfc, 0xd2, 0xc6, 0xda,
+		0x68, 0x59, 0xe6, 0x96, 0x31, 0x13, 0xa1, 0x17,
+		0xd, 0xe7, 0x93, 0xe4, 0xb7, 0x25, 0xb8, 0x4d,
+		0x1e, 0xb, 0x4c, 0xf9, 0x9e, 0xc5, 0x8c, 0xe9,
+	}
 )
 
 func createTestLndClient(ctrl *gomock.Controller, pubKey common.PubKey) (
@@ -62,14 +70,9 @@ func createTestLndClient(ctrl *gomock.Controller, pubKey common.PubKey) (
 }
 
 func TestMux(t *testing.T) {
-	logger, _ := zap.NewDevelopment()
+	defer test_common.Timeout()()
 
-	var testKey = [32]byte{
-		0x81, 0xb6, 0x37, 0xd8, 0xfc, 0xd2, 0xc6, 0xda,
-		0x68, 0x59, 0xe6, 0x96, 0x31, 0x13, 0xa1, 0x17,
-		0xd, 0xe7, 0x93, 0xe4, 0xb7, 0x25, 0xb8, 0x4d,
-		0x1e, 0xb, 0x4c, 0xf9, 0x9e, 0xc5, 0x8c, 0xe9,
-	}
+	logger, _ := zap.NewDevelopment()
 
 	keyRing := NewKeyRing(testKey)
 
@@ -109,6 +112,7 @@ func TestMux(t *testing.T) {
 			HtlcHoldDuration:     time.Second,
 			AcceptTimeout:        time.Second * 2,
 			Logger:               logger.Sugar(),
+			PrivKey:              testKey,
 		},
 	)
 
@@ -129,15 +133,6 @@ func TestMux(t *testing.T) {
 		errChan <- mux.Run(ctx)
 	}()
 
-	// Store invoice.
-	require.NoError(t, registry.NewInvoice(&persistence.InvoiceCreationData{
-		ExpiresAt:           time.Now().Add(time.Minute),
-		InvoiceCreationData: invoice.InvoiceCreationData,
-		CreatedAt:           time.Now(),
-		PaymentRequest:      "payreq",
-		ID:                  1,
-	}))
-
 	var updateChan = make(chan InvoiceUpdate, 1)
 	cancelSubscription, err := registry.Subscribe(testHash, func(update InvoiceUpdate) {
 		logger.Sugar().Infow("Payment received", "state", update.State)
@@ -151,8 +146,6 @@ func TestMux(t *testing.T) {
 		update := <-updateChan
 		require.Equal(t, state, update.State)
 	}
-
-	expectUpdate(persistence.InvoiceStateOpen)
 
 	// Send initial block heights.
 	blockChan1 <- &chainrpc.BlockEpoch{Height: 1000}
@@ -198,10 +191,11 @@ func TestMux(t *testing.T) {
 	}
 
 	expectResponse := func(resp *routerrpc.ForwardHtlcInterceptResponse,
-		expectedAction routerrpc.ResolveHoldForwardAction) {
+		htlcID int, expectedAction routerrpc.ResolveHoldForwardAction) {
 
 		t.Helper()
 
+		require.Equal(t, uint64(htlcID), resp.IncomingCircuitKey.HtlcId)
 		require.Equal(t, expectedAction, resp.Action)
 	}
 
@@ -213,8 +207,8 @@ func TestMux(t *testing.T) {
 	htlcChan1 <- receiveHtlc(0, 6000)
 
 	// Let it time out. Expect two responses, one for each notified arrival.
-	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_FAIL)
-	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_FAIL)
+	expectResponse(<-responseChan1, 0, routerrpc.ResolveHoldForwardAction_FAIL)
+	expectResponse(<-responseChan1, 0, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	// Notify arrival of part 1.
 	htlcChan1 <- receiveHtlc(1, 6000)
@@ -227,8 +221,8 @@ func TestMux(t *testing.T) {
 
 	expectUpdate(persistence.InvoiceStateSettleRequested)
 
-	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_SETTLE)
-	expectResponse(<-responseChan2, routerrpc.ResolveHoldForwardAction_SETTLE)
+	expectResponse(<-responseChan1, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
+	expectResponse(<-responseChan2, 2, routerrpc.ResolveHoldForwardAction_SETTLE)
 
 	expectUpdate(persistence.InvoiceStateSettled)
 
@@ -238,11 +232,11 @@ func TestMux(t *testing.T) {
 
 	// Replay settled htlc.
 	htlcChan1 <- receiveHtlc(1, 6000)
-	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_SETTLE)
+	expectResponse(<-responseChan1, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
 
 	// New payment to settled invoice
 	htlcChan1 <- receiveHtlc(10, 10000)
-	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_FAIL)
+	expectResponse(<-responseChan1, 10, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	cancelSubscription()
 
@@ -262,16 +256,6 @@ func TestMux(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Store invoice.
-	require.NoError(t, registry.NewInvoice(&persistence.InvoiceCreationData{
-		InvoiceCreationData: invoice.InvoiceCreationData,
-		CreatedAt:           time.Now(),
-		PaymentRequest:      "payreq",
-		ID:                  2,
-		ExpiresAt:           time.Now().Add(time.Minute),
-	}))
-	expectUpdate(persistence.InvoiceStateOpen)
-
 	// Regenerate onion blob for new hash.
 	onionBlob = genOnion()
 
@@ -282,7 +266,7 @@ func TestMux(t *testing.T) {
 
 	expectUpdate(persistence.InvoiceStateSettleRequested)
 
-	expectResponse(<-responseChan1, routerrpc.ResolveHoldForwardAction_SETTLE)
+	expectResponse(<-responseChan1, 20, routerrpc.ResolveHoldForwardAction_SETTLE)
 
 	expectUpdate(persistence.InvoiceStateSettled)
 

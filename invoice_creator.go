@@ -1,7 +1,7 @@
 package lnmux
 
 import (
-	"crypto/rand"
+	"encoding/binary"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -16,6 +16,8 @@ import (
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/types"
 )
+
+var byteOrder = binary.BigEndian
 
 const virtualChannel = 12345
 
@@ -65,6 +67,8 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 	memo string, descHash *lntypes.Hash, cltvDelta uint64) (
 	*Invoice, lntypes.Preimage, error) {
 
+	creationDate := time.Now()
+
 	// Get features.
 	featureMgr, err := feature.NewManager(feature.Config{})
 	if err != nil {
@@ -77,11 +81,27 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 
 	nodeSigner := netann.NewNodeSigner(nodeKeySigner)
 
-	paymentPreimage := &lntypes.Preimage{}
-	if _, err := rand.Read(paymentPreimage[:]); err != nil {
+	privKey, err := c.keyRing.DerivePrivKey(c.idKeyDesc)
+	if err != nil {
 		return nil, lntypes.Preimage{}, err
 	}
-	paymentHash := paymentPreimage.Hash()
+
+	expiryTime := creationDate.Add(expiry)
+	statelessData, err := encodeStatelessData(
+		privKey.Serialize(), amtMSat, expiryTime,
+	)
+	if err != nil {
+		return nil, lntypes.Preimage{}, err
+	}
+
+	paymentHash := statelessData.preimage.Hash()
+
+	// TODO: Optionally we could encrypt the payment metadata here, just like
+	// rust-lightning does:
+	// https://github.com/lightningdevkit/rust-lightning/blob/a600eee87c96ee8865402e86bb1865011bf2d2de/lightning/src/ln/inbound_payment.rs#L166
+	//
+	// Background:
+	// https://github.com/lightningdevkit/rust-lightning/issues/1171#issuecomment-1162817360
 
 	// We also create an encoded payment request which allows the
 	// caller to compactly send the invoice to the payer. We'll create a
@@ -128,17 +148,11 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 	invoiceFeatures := featureMgr.Get(feature.SetInvoice)
 	options = append(options, zpay32.Features(invoiceFeatures))
 
-	// Generate and set a random payment address for this invoice. If the
-	// sender understands payment addresses, this can be used to avoid
-	// intermediaries probing the receiver.
-	var paymentAddr [32]byte
-	if _, err := rand.Read(paymentAddr[:]); err != nil {
-		return nil, lntypes.Preimage{}, err
-	}
-	options = append(options, zpay32.PaymentAddr(paymentAddr))
+	// Set the payment address.
+	options = append(options, zpay32.PaymentAddr(statelessData.paymentAddr))
 
 	// Create and encode the payment request as a bech32 (zpay32) string.
-	creationDate := time.Now()
+
 	payReq, err := zpay32.NewInvoice(
 		c.activeNetParams, paymentHash, creationDate, options...,
 	)
@@ -159,12 +173,11 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 		CreationDate:   creationDate,
 		PaymentRequest: payReqString,
 		InvoiceCreationData: types.InvoiceCreationData{
-			FinalCltvDelta:  int32(payReq.MinFinalCLTVExpiry()),
 			Value:           lnwire.MilliSatoshi(amtMSat),
-			PaymentPreimage: *paymentPreimage,
-			PaymentAddr:     paymentAddr,
+			PaymentPreimage: statelessData.preimage,
+			PaymentAddr:     statelessData.paymentAddr,
 		},
 	}
 
-	return newInvoice, *paymentPreimage, nil
+	return newInvoice, statelessData.preimage, nil
 }
