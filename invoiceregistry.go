@@ -721,6 +721,42 @@ type registryHtlc struct {
 	resolve       func(HtlcResolution)
 }
 
+func (i *InvoiceRegistry) resolveViaDb(ctx context.Context,
+	h *registryHtlc) (bool, error) {
+
+	dbInvoice, htlcs, err := i.cdb.Get(ctx, h.rHash)
+	switch {
+	case err == types.ErrInvoiceNotFound:
+		return false, nil
+
+	case err != nil:
+		return false, err
+	}
+
+	i.logger.Debugw("Loaded settled invoice from db", "hash", h.rHash)
+
+	// Handle replays to a settled invoice.
+	if len(htlcs) == 0 {
+		return false, errors.New("unexpected unsettled invoice")
+	}
+
+	// If this htlc was used for settling the invoice,
+	// resolve to settled again.
+	if _, ok := htlcs[h.circuitKey]; ok {
+		h.resolve(NewSettleResolution(
+			dbInvoice.PaymentPreimage,
+			ResultReplayToSettled,
+		))
+
+		return true, nil
+	}
+
+	// Otherwise fail the htlc.
+	h.resolve(NewFailResolution(ResultInvoiceNotOpen))
+
+	return true, nil
+}
+
 func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	// Always require an mpp record.
 	mpp := h.payload.MultiPath()
@@ -735,49 +771,17 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	state, ok := i.invoices[h.rHash]
 	if !ok {
 		// Invoice is not present in memory. Do a db lookup to see if this
-		// happens to be a previously settled invoice.
-		dbInvoice, htlcs, err := i.cdb.Get(ctx, h.rHash)
-		switch {
-		case err == types.ErrInvoiceNotFound:
+		// happens to be a previously settled invoice and resolve the htlc if
+		// possible.
+		resolved, err := i.resolveViaDb(ctx, h)
+		if err != nil {
+			return err
+		}
+		if !resolved {
 			// If the invoice was not found, return a failure
 			// resolution with an invoice not found result.
 			h.resolve(NewFailResolution(ResultInvoiceNotFound))
-
-			return nil
-
-		case err != nil:
-			return err
 		}
-
-		// Fail htlcs paying to unpayable invoices (expired or cancelled).
-		if dbInvoice.State != persistence.InvoiceStateSettleRequested &&
-			dbInvoice.State != persistence.InvoiceStateSettled {
-
-			h.resolve(NewFailResolution(ResultInvoiceNotFound))
-
-			return nil
-		}
-
-		i.logger.Debugw("Loaded settled invoice from db", "hash", h.rHash)
-
-		// Handle replays to a settled invoice.
-		if len(htlcs) == 0 {
-			return errors.New("unexpected unsettled invoice")
-		}
-
-		// If this htlc was used for settling the invoice,
-		// resolve to settled again.
-		if _, ok := htlcs[h.circuitKey]; ok {
-			h.resolve(NewSettleResolution(
-				dbInvoice.PaymentPreimage,
-				ResultReplayToSettled,
-			))
-
-			return nil
-		}
-
-		// Otherwise fail the htlc.
-		h.resolve(NewFailResolution(ResultInvoiceNotOpen))
 
 		return nil
 	}
