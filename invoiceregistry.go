@@ -84,6 +84,10 @@ func (i *invoiceState) totalSetAmt() int {
 	return total
 }
 
+func (i *invoiceState) isSetComplete() bool {
+	return i.totalSetAmt() == int(i.invoice.Value)
+}
+
 type invoiceRequest struct {
 	hash    lntypes.Hash
 	errChan chan error
@@ -568,7 +572,7 @@ func (i *InvoiceRegistry) failInvoice(ctx context.Context,
 	}
 
 	// Don't expire invoices that are already accepted.
-	setComplete := state.totalSetAmt() == int(state.invoice.Value)
+	setComplete := state.isSetComplete()
 	if reason == persistence.CancelledReasonExpired && setComplete {
 		return nil
 	}
@@ -667,8 +671,7 @@ func (i *InvoiceRegistry) cancelSingleHtlc(hash lntypes.Hash,
 	}
 
 	// Do nothing if the set is already complete.
-	setComplete := invoice.totalSetAmt() == int(invoice.invoice.Value)
-	if setComplete {
+	if invoice.isSetComplete() {
 		return nil
 	}
 
