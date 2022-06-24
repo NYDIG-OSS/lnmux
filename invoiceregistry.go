@@ -115,11 +115,11 @@ type InvoiceRegistry struct {
 	// It is used for efficient notification of links.
 	hodlSubscriptions map[types.CircuitKey][]func(HtlcResolution)
 
-	invoices       map[lntypes.Hash]*invoiceState
-	htlcChan       chan *registryHtlc
-	newInvoiceChan chan *persistence.InvoiceCreationData
-	settleChan     chan *invoiceRequest
-	cancelChan     chan *invoiceRequest
+	invoices          map[lntypes.Hash]*invoiceState
+	htlcChan          chan *registryHtlc
+	newInvoiceChan    chan *persistence.InvoiceCreationData
+	requestSettleChan chan *invoiceRequest
+	cancelChan        chan *invoiceRequest
 
 	autoReleaseHeap *queue.PriorityQueue
 	logger          *zap.SugaredLogger
@@ -149,7 +149,7 @@ func NewRegistry(cdb *persistence.PostgresPersister,
 		newInvoiceSubscription:    make(chan invoiceSubscription),
 		cancelInvoiceSubscription: make(chan invoiceSubscriptionCancelRequest),
 		subscriptionManager:       newSubscriptionManager(cfg.Logger),
-		settleChan:                make(chan *invoiceRequest),
+		requestSettleChan:         make(chan *invoiceRequest),
 		cancelChan:                make(chan *invoiceRequest),
 		quit:                      make(chan struct{}),
 
@@ -263,7 +263,7 @@ func (i *InvoiceRegistry) RequestSettle(hash lntypes.Hash) error {
 	}
 
 	select {
-	case i.settleChan <- request:
+	case i.requestSettleChan <- request:
 
 	case <-i.quit:
 		return ErrShuttingDown
@@ -401,7 +401,7 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 		case request := <-i.cancelInvoiceSubscription:
 			i.subscriptionManager.deleteSubscription(request.hash, request.id)
 
-		case req := <-i.settleChan:
+		case req := <-i.requestSettleChan:
 			sendResponse := func(err error) error {
 				return i.sendResponse(req.errChan, err)
 			}
