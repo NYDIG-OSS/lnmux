@@ -81,6 +81,7 @@ func runAction(c *cli.Context) error {
 			HtlcHoldDuration:     30 * time.Second,
 			AcceptTimeout:        60 * time.Second,
 			Logger:               log,
+			AutoSettle:           cfg.AutoSettle,
 		},
 	)
 

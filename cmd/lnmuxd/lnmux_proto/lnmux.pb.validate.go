@@ -49,8 +49,6 @@ func (m *AddInvoiceRequest) Validate() error {
 
 	// no validation rules for ExpirySecs
 
-	// no validation rules for AutoSettle
-
 	return nil
 }
 

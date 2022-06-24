@@ -65,6 +65,8 @@ type RegistryConfig struct {
 	Clock clock.Clock
 
 	Logger *zap.SugaredLogger
+
+	AutoSettle bool
 }
 
 type InvoiceCallback func(update InvoiceUpdate)
@@ -72,7 +74,6 @@ type InvoiceCallback func(update InvoiceUpdate)
 type invoiceState struct {
 	invoice       *types.InvoiceCreationData
 	acceptedHtlcs map[types.CircuitKey]*InvoiceHTLC
-	autoSettle    bool
 }
 
 func (i *invoiceState) totalSetAmt() int {
@@ -187,7 +188,6 @@ func (i *InvoiceRegistry) Run(ctx context.Context) error {
 		state := &invoiceState{
 			invoice:       &invoice.InvoiceCreationData.InvoiceCreationData,
 			acceptedHtlcs: make(map[types.CircuitKey]*InvoiceHTLC),
-			autoSettle:    invoice.AutoSettle,
 		}
 
 		hash := invoice.PaymentPreimage.Hash()
@@ -382,7 +382,6 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			state := &invoiceState{
 				invoice:       &invoice.InvoiceCreationData,
 				acceptedHtlcs: make(map[types.CircuitKey]*InvoiceHTLC),
-				autoSettle:    invoice.AutoSettle,
 			}
 
 			i.invoices[hash] = state
@@ -418,7 +417,7 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			}
 
 			// Don't allow external settles on auto-settling invoices.
-			if state.autoSettle {
+			if i.cfg.AutoSettle {
 				err := sendResponse(errors.New("invoice is auto-settling"))
 				if err != nil {
 					return err
@@ -894,7 +893,7 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	})
 
 	// Auto-settle invoice if specified.
-	if state.autoSettle {
+	if i.cfg.AutoSettle {
 		i.logger.Debugw("Auto-settling", "hash", h.rHash)
 
 		if err := i.markSettleRequested(ctx, state); err != nil {

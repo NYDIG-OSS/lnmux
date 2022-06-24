@@ -29,9 +29,7 @@ CREATE TABLE invoices
 
         "final_cltv_delta"      INTEGER         NOT NULL CHECK (final_cltv_delta > 0),
         "payment_addr"          BYTEA           NOT NULL UNIQUE CHECK (LENGTH(payment_addr) = 32),
-        "payment_request"       TEXT            NOT NULL CHECK (LENGTH(payment_request) > 0),
-
-        "auto_settle"           BOOLEAN         NOT NULL
+        "payment_request"       TEXT            NOT NULL CHECK (LENGTH(payment_request) > 0)
 );
 
 CREATE TABLE htlcs

@@ -30,7 +30,7 @@ type registryTestContext struct {
 	testAmt int64
 }
 
-func newRegistryTestContext(t *testing.T) *registryTestContext {
+func newRegistryTestContext(t *testing.T, autoSettle bool) *registryTestContext {
 	logger, _ := zap.NewDevelopment()
 
 	pg, db := setupTestDB(t)
@@ -41,6 +41,7 @@ func newRegistryTestContext(t *testing.T) *registryTestContext {
 		HtlcHoldDuration:     time.Second,
 		AcceptTimeout:        time.Second * 2,
 		Logger:               logger.Sugar(),
+		AutoSettle:           autoSettle,
 	}
 
 	c := &registryTestContext{
@@ -92,7 +93,7 @@ func (r *registryTestContext) payAddr(id int) lntypes.Preimage {
 	return [32]byte{0, byte(id)}
 }
 
-func (r *registryTestContext) addInvoice(id int, expiry time.Duration, autoSettle bool) {
+func (r *registryTestContext) addInvoice(id int, expiry time.Duration) {
 	preimage := r.preimage(id)
 	payAddr := r.payAddr(id)
 
@@ -107,7 +108,6 @@ func (r *registryTestContext) addInvoice(id int, expiry time.Duration, autoSettl
 		CreatedAt:      time.Now(),
 		PaymentRequest: "payreq",
 		ID:             int64(id),
-		AutoSettle:     autoSettle,
 	}))
 }
 
@@ -126,13 +126,13 @@ func (r *registryTestContext) subscribe(id int) (chan InvoiceUpdate, func()) {
 func TestInvoiceExpiry(t *testing.T) {
 	defer test.Timeout()()
 
-	c := newRegistryTestContext(t)
+	c := newRegistryTestContext(t, false)
 
 	// Subscribe to updates for invoice 1.
 	updateChan1, cancel1 := c.subscribe(1)
 
 	// Add invoice.
-	c.addInvoice(1, time.Second, false)
+	c.addInvoice(1, time.Second)
 
 	// Expect an open notification.
 	update := <-updateChan1
@@ -146,7 +146,7 @@ func TestInvoiceExpiry(t *testing.T) {
 	cancel1()
 
 	// Add another invoice.
-	c.addInvoice(2, time.Second, false)
+	c.addInvoice(2, time.Second)
 
 	// Expect the open update.
 	updateChan2, cancel2 := c.subscribe(2)
@@ -179,13 +179,13 @@ func TestInvoiceExpiry(t *testing.T) {
 func TestAutoSettle(t *testing.T) {
 	defer test.Timeout()()
 
-	c := newRegistryTestContext(t)
+	c := newRegistryTestContext(t, true)
 
 	// Subscribe to updates for invoice 1.
 	updateChan, cancelUpdates := c.subscribe(1)
 
 	// Add invoice.
-	c.addInvoice(1, time.Hour, true)
+	c.addInvoice(1, time.Hour)
 
 	// Expect an open notification.
 	update := <-updateChan

@@ -19,6 +19,9 @@ type Config struct {
 
 	// IdentityKey is the private key that is used to sign invoices.
 	IdentityKey string `yaml:"identityKey"`
+
+	// AutoSettle indicates that payments should be accepted automatically.
+	AutoSettle bool `yaml:"autoSettle"`
 }
 
 func (c *Config) GetIdentityKey() ([32]byte, error) {

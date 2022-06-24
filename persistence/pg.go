@@ -49,7 +49,6 @@ type InvoiceCreationData struct {
 	ExpiresAt      time.Time
 	ID             int64
 	PaymentRequest string
-	AutoSettle     bool
 }
 
 type dbInvoiceState string
@@ -87,7 +86,6 @@ type dbInvoice struct {
 	FinalCltvDelta    int32              `pg:"final_cltv_delta,use_zero"`
 	PaymentAddr       [32]byte           `pg:"payment_addr"`
 	PaymentRequest    string             `pg:"payment_request"`
-	AutoSettle        bool               `pg:"auto_settle,use_zero"`
 }
 
 type dbHtlc struct {
@@ -193,9 +191,8 @@ func unmarshallDbInvoice(invoice *dbInvoice) *Invoice {
 				Value:           lnwire.MilliSatoshi(invoice.AmountMsat),
 				PaymentAddr:     invoice.PaymentAddr,
 			},
-			ID:         invoice.ID,
-			ExpiresAt:  invoice.ExpiresAt,
-			AutoSettle: invoice.AutoSettle,
+			ID:        invoice.ID,
+			ExpiresAt: invoice.ExpiresAt,
 		},
 		SettledAt:       invoice.SettledAt,
 		State:           unmarshallDbInvoiceState(invoice.State),
@@ -346,7 +343,6 @@ func (p *PostgresPersister) Add(ctx context.Context, invoice *InvoiceCreationDat
 		PaymentRequest: invoice.PaymentRequest,
 		ID:             invoice.ID,
 		State:          dbInvoiceStateOpen,
-		AutoSettle:     invoice.AutoSettle,
 	}
 
 	_, err := p.conn.ModelContext(ctx, dbInvoice).Insert()
