@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"time"
 
 	"github.com/bottlepay/lnmux"
@@ -39,8 +38,6 @@ func newServer(creator *lnmux.InvoiceCreator, registry *lnmux.InvoiceRegistry) (
 
 func marshallInvoiceState(state persistence.InvoiceState) lnmux_proto.SubscribeSingleInvoiceResponse_InvoiceState {
 	switch state {
-	case persistence.InvoiceStateOpen:
-		return lnmux_proto.SubscribeSingleInvoiceResponse_STATE_OPEN
 
 	case persistence.InvoiceStateAccepted:
 		return lnmux_proto.SubscribeSingleInvoiceResponse_STATE_ACCEPTED
@@ -51,30 +48,8 @@ func marshallInvoiceState(state persistence.InvoiceState) lnmux_proto.SubscribeS
 	case persistence.InvoiceStateSettled:
 		return lnmux_proto.SubscribeSingleInvoiceResponse_STATE_SETTLED
 
-	case persistence.InvoiceStateCancelled:
-		return lnmux_proto.SubscribeSingleInvoiceResponse_STATE_CANCELLED
-
 	default:
 		panic("unknown invoice state")
-	}
-}
-
-func marshallCancelledReason(reason persistence.CancelledReason) lnmux_proto.SubscribeSingleInvoiceResponse_CancelledReason {
-	switch reason {
-	case persistence.CancelledReasonNone:
-		return lnmux_proto.SubscribeSingleInvoiceResponse_REASON_NONE
-
-	case persistence.CancelledReasonExpired:
-		return lnmux_proto.SubscribeSingleInvoiceResponse_REASON_EXPIRED
-
-	case persistence.CancelledReasonAcceptTimeout:
-		return lnmux_proto.SubscribeSingleInvoiceResponse_REASON_ACCEPT_TIMEOUT
-
-	case persistence.CancelledReasonExternal:
-		return lnmux_proto.SubscribeSingleInvoiceResponse_REASON_EXTERNAL
-
-	default:
-		panic("unknown cancelled reason")
 	}
 }
 
@@ -136,8 +111,7 @@ func (s *server) SubscribeSingleInvoice(req *lnmux_proto.SubscribeSingleInvoiceR
 			}
 
 			err := subscription.Send(&lnmux_proto.SubscribeSingleInvoiceResponse{
-				State:           marshallInvoiceState(update.State),
-				CancelledReason: marshallCancelledReason(update.CancelledReason),
+				State: marshallInvoiceState(update.State),
 			})
 			if err != nil {
 				return err
@@ -170,7 +144,6 @@ func (s *server) AddInvoice(ctx context.Context,
 
 	// Create the invoice.
 	expiry := time.Duration(req.ExpirySecs) * time.Second
-	expiryTime := time.Now().Add(expiry)
 	invoice, preimage, err := s.creator.Create(
 		req.AmtMsat, expiry, req.Description, descHash, finalCltvExpiry,
 	)
@@ -179,21 +152,6 @@ func (s *server) AddInvoice(ctx context.Context,
 	}
 
 	hash := preimage.Hash()
-
-	// Store invoice.
-	creationData := &persistence.InvoiceCreationData{
-		InvoiceCreationData: invoice.InvoiceCreationData,
-		CreatedAt:           invoice.CreationDate,
-		ID:                  int64(rand.Int31()),
-		PaymentRequest:      invoice.PaymentRequest,
-		ExpiresAt:           expiryTime,
-		AutoSettle:          req.AutoSettle,
-	}
-
-	err = s.registry.NewInvoice(creationData)
-	if err != nil {
-		return nil, err
-	}
 
 	return &lnmux_proto.AddInvoiceResponse{
 		PaymentRequest: invoice.PaymentRequest,

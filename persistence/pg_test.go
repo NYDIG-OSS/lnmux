@@ -3,7 +3,6 @@ package persistence
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/go-pg/pg/v10"
 	"github.com/lightningnetwork/lnd/lntypes"
@@ -37,26 +36,7 @@ func TestSettleInvoice(t *testing.T) {
 	_, _, err := persister.Get(context.Background(), hash)
 	require.ErrorIs(t, err, types.ErrInvoiceNotFound)
 
-	require.NoError(t, persister.Add(context.Background(), &InvoiceCreationData{
-		CreatedAt:      time.Unix(100, 0),
-		PaymentRequest: "ln...",
-		InvoiceCreationData: types.InvoiceCreationData{
-			FinalCltvDelta:  40,
-			PaymentPreimage: preimage,
-			Value:           100,
-			PaymentAddr:     [32]byte{2},
-		},
-		ID:        123,
-		ExpiresAt: time.Now().Add(time.Hour),
-	}))
-
-	invoice, htlcs, err := persister.Get(context.Background(), hash)
-	require.NoError(t, err)
-	require.Empty(t, htlcs, 0)
-	require.Equal(t, invoice.PaymentRequest, "ln...")
-	require.Equal(t, InvoiceStateOpen, invoice.State)
-
-	htlcs = map[types.CircuitKey]int64{
+	htlcs := map[types.CircuitKey]int64{
 		{
 			ChanID: 10,
 			HtlcID: 11,
@@ -66,6 +46,18 @@ func TestSettleInvoice(t *testing.T) {
 			HtlcID: 12,
 		}: 30,
 	}
-	require.NoError(t, persister.RequestSettle(context.Background(), hash, htlcs))
+	require.NoError(t, persister.RequestSettle(context.Background(), &InvoiceCreationData{
+		InvoiceCreationData: types.InvoiceCreationData{
+			PaymentPreimage: preimage,
+			Value:           100,
+			PaymentAddr:     [32]byte{2},
+		},
+	}, htlcs))
+
+	invoice, htlcs, err := persister.Get(context.Background(), hash)
+	require.NoError(t, err)
+	require.Len(t, htlcs, 2)
+	require.False(t, invoice.Settled)
+
 	require.NoError(t, persister.Settle(context.Background(), hash))
 }

@@ -19,11 +19,6 @@ message AddInvoiceRequest {
     string description = 2;
     bytes description_hash = 3;
     int64 expiry_secs = 4;
-
-    // If set to true, invoices will be settled automatically when a payment to
-    // it comes in. It is not necessary or possible to request settlement
-    // manually.
-    bool auto_settle = 5;
 }
 
 message AddInvoiceResponse {
@@ -38,23 +33,12 @@ message SubscribeSingleInvoiceRequest {
 
 message SubscribeSingleInvoiceResponse {
     enum InvoiceState {
-      STATE_OPEN = 0;
-      STATE_ACCEPTED = 1;
-      STATE_SETTLE_REQUESTED = 2;
-      STATE_SETTLED = 3;
-      STATE_CANCELLED = 4;
-    }
-
-    enum CancelledReason {
-      REASON_NONE = 0;
-      REASON_EXPIRED = 1;
-      REASON_ACCEPT_TIMEOUT = 2;
-      REASON_EXTERNAL = 3;
+      STATE_ACCEPTED = 0;
+      STATE_SETTLE_REQUESTED = 1;
+      STATE_SETTLED = 2;
     }
     
     InvoiceState state = 1;
-        
-    CancelledReason cancelled_reason = 2;
 }
 
 message SettleInvoiceRequest {

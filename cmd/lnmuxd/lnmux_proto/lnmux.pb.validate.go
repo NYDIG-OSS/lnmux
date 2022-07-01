@@ -49,8 +49,6 @@ func (m *AddInvoiceRequest) Validate() error {
 
 	// no validation rules for ExpirySecs
 
-	// no validation rules for AutoSettle
-
 	return nil
 }
 
@@ -262,8 +260,6 @@ func (m *SubscribeSingleInvoiceResponse) Validate() error {
 	}
 
 	// no validation rules for State
-
-	// no validation rules for CancelledReason
 
 	return nil
 }

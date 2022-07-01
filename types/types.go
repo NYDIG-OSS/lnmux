@@ -14,10 +14,6 @@ var (
 )
 
 type InvoiceCreationData struct {
-	// FinalCltvDelta is the minimum required number of blocks before htlc
-	// expiry when the invoice is accepted.
-	FinalCltvDelta int32
-
 	// PaymentPreimage is the preimage which is to be revealed in the
 	// occasion that an HTLC paying to the hash of this preimage is
 	// extended. Set to nil if the preimage isn't known yet.
