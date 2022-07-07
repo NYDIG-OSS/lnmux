@@ -120,6 +120,16 @@ func (r *registryTestContext) subscribe(hash lntypes.Hash) (chan InvoiceUpdate, 
 	return updateChan, cancel
 }
 
+func (r *registryTestContext) subscribeAccept() (chan lntypes.Hash, func()) {
+	updateChan := make(chan lntypes.Hash)
+	cancel, err := r.registry.SubscribeAccept(func(hash lntypes.Hash) {
+		updateChan <- hash
+	})
+	require.NoError(r.t, err)
+
+	return updateChan, cancel
+}
+
 func TestInvoiceExpiry(t *testing.T) {
 	defer test.Timeout()()
 
@@ -162,6 +172,7 @@ func TestAutoSettle(t *testing.T) {
 
 	// Subscribe to updates for invoice.
 	updateChan, cancelUpdates := c.subscribe(preimage.Hash())
+	acceptChan, cancelAcceptUpdates := c.subscribeAccept()
 
 	resolved := make(chan struct{})
 	c.registry.NotifyExitHopHtlc(&registryHtlc{
@@ -178,6 +189,9 @@ func TestAutoSettle(t *testing.T) {
 		},
 	})
 
+	acceptedInvoice := <-acceptChan
+	require.Equal(t, preimage.Hash(), acceptedInvoice)
+
 	update := <-updateChan
 	require.Equal(t, persistence.InvoiceStateAccepted, update.State)
 
@@ -190,6 +204,7 @@ func TestAutoSettle(t *testing.T) {
 	<-resolved
 
 	cancelUpdates()
+	cancelAcceptUpdates()
 }
 
 type testPayload struct {
