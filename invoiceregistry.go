@@ -104,11 +104,6 @@ type invoiceSubscription struct {
 	id       int
 }
 
-type invoiceSubscriptionCancelRequest struct {
-	hash lntypes.Hash
-	id   int
-}
-
 // InvoiceRegistry is a central registry of all the outstanding invoices
 // created by the daemon. The registry is a thin wrapper around a map in order
 // to ensure that all updates/reads are thread safe.
@@ -133,7 +128,7 @@ type InvoiceRegistry struct {
 	logger          *zap.SugaredLogger
 
 	newInvoiceSubscription    chan invoiceSubscription
-	cancelInvoiceSubscription chan invoiceSubscriptionCancelRequest
+	cancelInvoiceSubscription chan int
 
 	subscriptionManager *subscriptionManager
 
@@ -154,7 +149,7 @@ func NewRegistry(cdb *persistence.PostgresPersister,
 		invoices:                  make(map[lntypes.Hash]*invoiceState),
 		htlcChan:                  make(chan *registryHtlc),
 		newInvoiceSubscription:    make(chan invoiceSubscription),
-		cancelInvoiceSubscription: make(chan invoiceSubscriptionCancelRequest),
+		cancelInvoiceSubscription: make(chan int),
 		subscriptionManager:       newSubscriptionManager(cfg.Logger),
 		requestSettleChan:         make(chan *invoiceRequest),
 		cancelChan:                make(chan *invoiceRequest),
@@ -205,10 +200,7 @@ func (i *InvoiceRegistry) Subscribe(hash lntypes.Hash,
 		logger.Debugw("Removing subscriber")
 
 		select {
-		case i.cancelInvoiceSubscription <- invoiceSubscriptionCancelRequest{
-			id:   subscriberId,
-			hash: hash,
-		}:
+		case i.cancelInvoiceSubscription <- subscriberId:
 		case <-i.quit:
 		}
 	}, nil
@@ -325,8 +317,8 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 				return err
 			}
 
-		case request := <-i.cancelInvoiceSubscription:
-			i.subscriptionManager.deleteSubscription(request.hash, request.id)
+		case id := <-i.cancelInvoiceSubscription:
+			i.subscriptionManager.deleteSubscription(id)
 
 		case req := <-i.requestSettleChan:
 			sendResponse := func(err error) error {

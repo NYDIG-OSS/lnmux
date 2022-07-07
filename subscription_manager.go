@@ -8,21 +8,23 @@ import (
 )
 
 type subscriptionManager struct {
-	subscriptions map[lntypes.Hash]map[int]InvoiceCallback
-	logger        *zap.SugaredLogger
+	subscriptions    map[lntypes.Hash]map[int]InvoiceCallback
+	subscriptionHash map[int]lntypes.Hash
+	logger           *zap.SugaredLogger
 
 	nextSubscriberId uint64
 }
 
 func newSubscriptionManager(logger *zap.SugaredLogger) *subscriptionManager {
 	return &subscriptionManager{
-		subscriptions: make(map[lntypes.Hash]map[int]InvoiceCallback),
-		logger:        logger,
+		subscriptions:    make(map[lntypes.Hash]map[int]InvoiceCallback),
+		subscriptionHash: make(map[int]lntypes.Hash),
+		logger:           logger,
 	}
 }
 
-func (s *subscriptionManager) deleteSubscription(hash lntypes.Hash, id int) {
-	subs, ok := s.subscriptions[hash]
+func (s *subscriptionManager) deleteSubscription(id int) {
+	hash, ok := s.subscriptionHash[id]
 	if !ok {
 		s.logger.Debugw("no subscriptions for hash",
 			"hash", hash)
@@ -30,14 +32,21 @@ func (s *subscriptionManager) deleteSubscription(hash lntypes.Hash, id int) {
 		return
 	}
 
-	if _, ok := subs[id]; !ok {
-		s.logger.Debugw("subscription not found",
-			"id", id, "hash", hash)
+	subs, ok := s.subscriptions[hash]
+	if !ok {
+		panic("inconsistent subscription")
+	}
 
-		return
+	if _, ok := subs[id]; !ok {
+		panic("inconsistent subscription")
 	}
 
 	delete(subs, id)
+	if len(subs) == 0 {
+		delete(s.subscriptions, hash)
+	}
+
+	delete(s.subscriptionHash, id)
 }
 
 func (s *subscriptionManager) addSubscription(hash lntypes.Hash, id int,
@@ -48,6 +57,8 @@ func (s *subscriptionManager) addSubscription(hash lntypes.Hash, id int,
 		subs[hash] = make(map[int]InvoiceCallback)
 	}
 	subs[hash][id] = callback
+
+	s.subscriptionHash[id] = hash
 }
 
 func (s *subscriptionManager) generateSubscriptionId() int {
