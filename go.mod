@@ -1,6 +1,6 @@
 module github.com/bottlepay/lnmux
 
-go 1.17
+go 1.18
 
 require (
 	github.com/btcsuite/btcd v0.22.0-beta.0.20220330201728-074266215c26
