@@ -34,6 +34,8 @@ var (
 	// ErrAutoSettling is returned when a settle request is made in
 	// auto-settle mode.
 	ErrAutoSettling = errors.New("lnmux is in auto-settle mode")
+
+	ErrSettleRequested = errors.New("invoice settle already requested")
 )
 
 const (
@@ -380,7 +382,26 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			// Retrieve invoice.
 			state, ok := i.invoices[req.hash]
 			if !ok {
-				if err := sendResponse(types.ErrInvoiceNotFound); err != nil {
+				// The invoice is not in the accepted state. Check the database
+				// to see if it was already settled or requested to be settled.
+				var requestErr error
+
+				_, _, err := i.cdb.Get(ctx, req.hash)
+				switch {
+				// Invoice already settled or requested to be settled. This
+				// operation is implemented idempotently, so return success.
+				case err == nil:
+					requestErr = nil
+
+				case err == types.ErrInvoiceNotFound:
+					requestErr = types.ErrInvoiceNotFound
+
+				case err != nil:
+					return err
+				}
+
+				err = sendResponse(requestErr)
+				if err != nil {
 					return err
 				}
 
@@ -422,7 +443,27 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			// Retrieve invoice.
 			state, ok := i.invoices[req.hash]
 			if !ok {
-				err := i.sendResponse(req.errChan, types.ErrInvoiceNotFound)
+				// The invoice is not in the accepted state. Check the database
+				// to see if it was already settled or requested to be settled.
+				var requestErr error
+
+				invoice, _, err := i.cdb.Get(ctx, req.hash)
+				switch {
+				case err == nil:
+					if invoice.Settled {
+						requestErr = ErrInvoiceAlreadySettled
+					} else {
+						requestErr = ErrSettleRequested
+					}
+
+				case err == types.ErrInvoiceNotFound:
+					requestErr = types.ErrInvoiceNotFound
+
+				case err != nil:
+					return err
+				}
+
+				err = i.sendResponse(req.errChan, requestErr)
 				if err != nil {
 					return err
 				}

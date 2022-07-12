@@ -8,6 +8,7 @@ import (
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/persistence"
 	"github.com/bottlepay/lnmux/test"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/go-pg/pg/v10"
 	"github.com/lightningnetwork/lnd/clock"
@@ -111,7 +112,7 @@ func (r *registryTestContext) createInvoice(id int, expiry time.Duration) (
 }
 
 func (r *registryTestContext) subscribe(hash lntypes.Hash) (chan InvoiceUpdate, func()) {
-	updateChan := make(chan InvoiceUpdate)
+	updateChan := make(chan InvoiceUpdate, 1)
 	cancel, err := r.registry.Subscribe(hash, func(update InvoiceUpdate) {
 		updateChan <- update
 	})
@@ -205,6 +206,97 @@ func TestAutoSettle(t *testing.T) {
 
 	cancelUpdates()
 	cancelAcceptUpdates()
+}
+
+func TestSettle(t *testing.T) {
+	defer test.Timeout()()
+
+	c := newRegistryTestContext(t, false)
+
+	// Add invoice.
+	invoice, preimage := c.createInvoice(1, time.Hour)
+	hash := preimage.Hash()
+
+	// Test cancel/settle on invoices that are not yet accepted.
+	require.ErrorIs(t, c.registry.RequestSettle(hash), types.ErrInvoiceNotFound)
+	require.ErrorIs(t, c.registry.CancelInvoice(hash), types.ErrInvoiceNotFound)
+
+	// Subscribe to updates for invoice.
+	updateChan, cancelUpdates := c.subscribe(hash)
+
+	resolved := make(chan struct{})
+	c.registry.NotifyExitHopHtlc(&registryHtlc{
+		rHash:         hash,
+		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
+		expiry:        100,
+		currentHeight: 0,
+		resolve: func(r HtlcResolution) {
+			close(resolved)
+		},
+		payload: &testPayload{
+			amt:     lnwire.MilliSatoshi(c.testAmt),
+			payAddr: invoice.PaymentAddr,
+		},
+	})
+
+	update := <-updateChan
+	require.Equal(t, persistence.InvoiceStateAccepted, update.State)
+
+	require.NoError(t, c.registry.RequestSettle(hash))
+
+	update = <-updateChan
+	require.Equal(t, persistence.InvoiceStateSettleRequested, update.State)
+
+	update = <-updateChan
+	require.Equal(t, persistence.InvoiceStateSettled, update.State)
+
+	<-resolved
+
+	// Test idempotency.
+	require.NoError(t, c.registry.RequestSettle(hash))
+
+	require.ErrorIs(t, c.registry.CancelInvoice(hash), ErrInvoiceAlreadySettled)
+
+	cancelUpdates()
+}
+
+func TestCancel(t *testing.T) {
+	defer test.Timeout()()
+
+	c := newRegistryTestContext(t, false)
+
+	// Add invoice.
+	invoice, preimage := c.createInvoice(1, time.Hour)
+	hash := preimage.Hash()
+
+	// Subscribe to updates for invoice.
+	updateChan, cancelUpdates := c.subscribe(hash)
+
+	resolved := make(chan struct{})
+	c.registry.NotifyExitHopHtlc(&registryHtlc{
+		rHash:         hash,
+		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
+		expiry:        100,
+		currentHeight: 0,
+		resolve: func(r HtlcResolution) {
+			close(resolved)
+		},
+		payload: &testPayload{
+			amt:     lnwire.MilliSatoshi(c.testAmt),
+			payAddr: invoice.PaymentAddr,
+		},
+	})
+
+	update := <-updateChan
+	require.Equal(t, persistence.InvoiceStateAccepted, update.State)
+
+	require.NoError(t, c.registry.CancelInvoice(hash))
+
+	<-resolved
+
+	require.ErrorIs(t, c.registry.CancelInvoice(hash), types.ErrInvoiceNotFound)
+
+	cancelUpdates()
 }
 
 type testPayload struct {
