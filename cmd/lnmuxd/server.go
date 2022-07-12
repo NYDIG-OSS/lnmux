@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/bottlepay/lnmux"
-	"github.com/bottlepay/lnmux/cmd/lnmuxd/lnmux_proto"
+	"github.com/bottlepay/lnmux/lnmuxrpc"
 	"github.com/bottlepay/lnmux/persistence"
 	"github.com/lightningnetwork/lnd/lntypes"
 )
@@ -26,7 +26,7 @@ type server struct {
 	registry *lnmux.InvoiceRegistry
 	creator  *lnmux.InvoiceCreator
 
-	lnmux_proto.UnimplementedServiceServer
+	lnmuxrpc.UnimplementedServiceServer
 }
 
 func newServer(creator *lnmux.InvoiceCreator, registry *lnmux.InvoiceRegistry) (*server, error) {
@@ -36,25 +36,25 @@ func newServer(creator *lnmux.InvoiceCreator, registry *lnmux.InvoiceRegistry) (
 	}, nil
 }
 
-func marshallInvoiceState(state persistence.InvoiceState) lnmux_proto.SubscribeSingleInvoiceResponse_InvoiceState {
+func marshallInvoiceState(state persistence.InvoiceState) lnmuxrpc.SubscribeSingleInvoiceResponse_InvoiceState {
 	switch state {
 
 	case persistence.InvoiceStateAccepted:
-		return lnmux_proto.SubscribeSingleInvoiceResponse_STATE_ACCEPTED
+		return lnmuxrpc.SubscribeSingleInvoiceResponse_STATE_ACCEPTED
 
 	case persistence.InvoiceStateSettleRequested:
-		return lnmux_proto.SubscribeSingleInvoiceResponse_STATE_SETTLE_REQUESTED
+		return lnmuxrpc.SubscribeSingleInvoiceResponse_STATE_SETTLE_REQUESTED
 
 	case persistence.InvoiceStateSettled:
-		return lnmux_proto.SubscribeSingleInvoiceResponse_STATE_SETTLED
+		return lnmuxrpc.SubscribeSingleInvoiceResponse_STATE_SETTLED
 
 	default:
 		panic("unknown invoice state")
 	}
 }
 
-func (s *server) SubscribeSingleInvoice(req *lnmux_proto.SubscribeSingleInvoiceRequest,
-	subscription lnmux_proto.Service_SubscribeSingleInvoiceServer) error {
+func (s *server) SubscribeSingleInvoice(req *lnmuxrpc.SubscribeSingleInvoiceRequest,
+	subscription lnmuxrpc.Service_SubscribeSingleInvoiceServer) error {
 
 	hash, err := lntypes.MakeHash(req.Hash)
 	if err != nil {
@@ -67,7 +67,7 @@ func (s *server) SubscribeSingleInvoice(req *lnmux_proto.SubscribeSingleInvoiceR
 			return s.registry.Subscribe(hash, cb)
 		},
 		func(update lnmux.InvoiceUpdate) error {
-			return subscription.Send(&lnmux_proto.SubscribeSingleInvoiceResponse{
+			return subscription.Send(&lnmuxrpc.SubscribeSingleInvoiceResponse{
 				State: marshallInvoiceState(update.State),
 			})
 		},
@@ -134,8 +134,8 @@ func streamBuffered[T any](ctx context.Context,
 	}
 }
 
-func (s *server) SubscribePaymentAccepted(req *lnmux_proto.SubscribePaymentAcceptedRequest,
-	subscription lnmux_proto.Service_SubscribePaymentAcceptedServer) error {
+func (s *server) SubscribePaymentAccepted(req *lnmuxrpc.SubscribePaymentAcceptedRequest,
+	subscription lnmuxrpc.Service_SubscribePaymentAcceptedServer) error {
 
 	return streamBuffered(
 		subscription.Context(),
@@ -143,7 +143,7 @@ func (s *server) SubscribePaymentAccepted(req *lnmux_proto.SubscribePaymentAccep
 			return s.registry.SubscribeAccept(cb)
 		},
 		func(hash lntypes.Hash) error {
-			return subscription.Send(&lnmux_proto.SubscribePaymentAcceptedResponse{
+			return subscription.Send(&lnmuxrpc.SubscribePaymentAcceptedResponse{
 				Hash: hash[:],
 			})
 		},
@@ -151,7 +151,7 @@ func (s *server) SubscribePaymentAccepted(req *lnmux_proto.SubscribePaymentAccep
 }
 
 func (s *server) AddInvoice(ctx context.Context,
-	req *lnmux_proto.AddInvoiceRequest) (*lnmux_proto.AddInvoiceResponse,
+	req *lnmuxrpc.AddInvoiceRequest) (*lnmuxrpc.AddInvoiceResponse,
 	error) {
 
 	// Validate inputs.
@@ -183,7 +183,7 @@ func (s *server) AddInvoice(ctx context.Context,
 
 	hash := preimage.Hash()
 
-	return &lnmux_proto.AddInvoiceResponse{
+	return &lnmuxrpc.AddInvoiceResponse{
 		PaymentRequest: invoice.PaymentRequest,
 		Hash:           hash[:],
 		Preimage:       preimage[:],
@@ -191,7 +191,7 @@ func (s *server) AddInvoice(ctx context.Context,
 }
 
 func (s *server) SettleInvoice(ctx context.Context,
-	req *lnmux_proto.SettleInvoiceRequest) (*lnmux_proto.SettleInvoiceResponse,
+	req *lnmuxrpc.SettleInvoiceRequest) (*lnmuxrpc.SettleInvoiceResponse,
 	error) {
 
 	hash, err := lntypes.MakeHash(req.Hash)
@@ -204,11 +204,11 @@ func (s *server) SettleInvoice(ctx context.Context,
 		return nil, err
 	}
 
-	return &lnmux_proto.SettleInvoiceResponse{}, nil
+	return &lnmuxrpc.SettleInvoiceResponse{}, nil
 }
 
 func (s *server) CancelInvoice(ctx context.Context,
-	req *lnmux_proto.CancelInvoiceRequest) (*lnmux_proto.CancelInvoiceResponse,
+	req *lnmuxrpc.CancelInvoiceRequest) (*lnmuxrpc.CancelInvoiceResponse,
 	error) {
 
 	hash, err := lntypes.MakeHash(req.Hash)
@@ -221,5 +221,5 @@ func (s *server) CancelInvoice(ctx context.Context,
 		return nil, err
 	}
 
-	return &lnmux_proto.CancelInvoiceResponse{}, nil
+	return &lnmuxrpc.CancelInvoiceResponse{}, nil
 }

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package lnmux;
 
-option go_package = "github.com/bottlepay/lnmux_proto";
+option go_package = "github.com/bottlepay/lnmux/lnmuxrpc";
 
 service Service {
     rpc AddInvoice (AddInvoiceRequest) returns (AddInvoiceResponse);
