@@ -34,6 +34,10 @@ var (
 	// ErrInvoiceNotFound is returned when the invoice is unknown to the invoice
 	// registry.
 	ErrInvoiceNotFound = errors.New("invoice not found")
+
+	// ErrAutoSettling is returned when a settle request is made in
+	// auto-settle mode.
+	ErrAutoSettling = errors.New("lnmux is in auto-settle mode")
 )
 
 const (
@@ -385,7 +389,7 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 
 			// Don't allow external settles on auto-settling invoices.
 			if i.cfg.AutoSettle {
-				err := sendResponse(errors.New("invoice is auto-settling"))
+				err := sendResponse(ErrAutoSettling)
 				if err != nil {
 					return err
 				}

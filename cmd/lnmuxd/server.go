@@ -2,14 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/bottlepay/lnmux"
 	"github.com/bottlepay/lnmux/cmd/lnmuxd/lnmux_proto"
 	"github.com/bottlepay/lnmux/persistence"
 	"github.com/lightningnetwork/lnd/lntypes"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -123,7 +123,9 @@ func streamBuffered[T any](ctx context.Context,
 		case item, ok := <-bufferChan:
 			// If the channel gets closed, disconnect the client.
 			if !ok {
-				return errors.New("buffer overflow")
+				return status.Error(
+					codes.ResourceExhausted, "buffer overflow",
+				)
 			}
 
 			err := send(item)
@@ -156,18 +158,24 @@ func (s *server) AddInvoice(ctx context.Context,
 
 	// Validate inputs.
 	if req.ExpirySecs <= 0 {
-		return nil, errors.New("expiry_secs not specified")
+		return nil, status.Error(
+			codes.InvalidArgument, "expiry_secs not specified",
+		)
 	}
 
 	if req.AmtMsat <= 0 {
-		return nil, errors.New("amt_msat not specified")
+		return nil, status.Error(
+			codes.InvalidArgument, "amt_msat not specified",
+		)
 	}
 
 	var descHash *lntypes.Hash
 	if len(req.DescriptionHash) > 0 {
 		hash, err := lntypes.MakeHash(req.DescriptionHash)
 		if err != nil {
-			return nil, fmt.Errorf("invalid desc hash: %w", err)
+			return nil, status.Errorf(
+				codes.InvalidArgument, "invalid desc hash: %v", err,
+			)
 		}
 		descHash = &hash
 	}
@@ -178,7 +186,7 @@ func (s *server) AddInvoice(ctx context.Context,
 		req.AmtMsat, expiry, req.Description, descHash, finalCltvExpiry,
 	)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 
 	hash := preimage.Hash()
@@ -200,8 +208,19 @@ func (s *server) SettleInvoice(ctx context.Context,
 	}
 
 	err = s.registry.RequestSettle(hash)
-	if err != nil {
-		return nil, err
+	switch {
+	case err == lnmux.ErrInvoiceNotFound:
+		return nil, status.Error(
+			codes.NotFound, lnmux.ErrInvoiceNotFound.Error(),
+		)
+
+	case err == lnmux.ErrAutoSettling:
+		return nil, status.Error(
+			codes.Unavailable, lnmux.ErrAutoSettling.Error(),
+		)
+
+	case err != nil:
+		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 
 	return &lnmux_proto.SettleInvoiceResponse{}, nil
@@ -217,8 +236,12 @@ func (s *server) CancelInvoice(ctx context.Context,
 	}
 
 	err = s.registry.CancelInvoice(hash)
-	if err != nil {
-		return nil, err
+	switch {
+	case err == lnmux.ErrInvoiceNotFound:
+		return nil, status.Error(codes.NotFound, lnmux.ErrInvoiceNotFound.Error())
+
+	case err != nil:
+		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 
 	return &lnmux_proto.CancelInvoiceResponse{}, nil
