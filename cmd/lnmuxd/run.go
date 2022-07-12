@@ -41,7 +41,7 @@ func runAction(c *cli.Context) error {
 	}
 
 	// Parse lnd connection info from the configuration.
-	lnds, err := initLndClients(&cfg.Lnd)
+	lnds, activeNetParams, err := initLndClients(&cfg.Lnd)
 	if err != nil {
 		return err
 	}
@@ -53,8 +53,6 @@ func runAction(c *cli.Context) error {
 	}
 
 	keyRing := lnmux.NewKeyRing(identityKey)
-
-	activeNetParams := &chaincfg.RegressionNetParams
 
 	// Get a new creator instance.
 	var gwPubKeys []common.PubKey
@@ -177,21 +175,21 @@ func runAction(c *cli.Context) error {
 	return processErr
 }
 
-func initLndClients(cfg *LndConfig) ([]lnd.LndClient, error) {
+func initLndClients(cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
 	var (
 		nodes []lnd.LndClient
 	)
 
 	network, err := network(cfg.Network)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	seenPubKeys := make(map[common.PubKey]struct{})
 	for _, node := range cfg.Nodes {
 		pubkey, err := common.NewPubKeyFromStr(node.PubKey)
 		if err != nil {
-			return nil, fmt.Errorf("cannot parse pubkey %v: %v", node.PubKey, err)
+			return nil, nil, fmt.Errorf("cannot parse pubkey %v: %v", node.PubKey, err)
 		}
 
 		lnd, err := lnd.NewLndClient(lnd.Config{
@@ -204,18 +202,18 @@ func initLndClients(cfg *LndConfig) ([]lnd.LndClient, error) {
 			Timeout:      cfg.Timeout,
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		pubKey := lnd.PubKey()
 		if _, exists := seenPubKeys[pubKey]; exists {
-			return nil, fmt.Errorf("duplicate lnd node: %v", pubKey)
+			return nil, nil, fmt.Errorf("duplicate lnd node: %v", pubKey)
 		}
 		seenPubKeys[pubKey] = struct{}{}
 
 		nodes = append(nodes, lnd)
 	}
 
-	return nodes, nil
+	return nodes, network, nil
 }
 
 func network(network string) (*chaincfg.Params, error) {

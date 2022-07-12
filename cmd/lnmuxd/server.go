@@ -36,6 +36,32 @@ func newServer(creator *lnmux.InvoiceCreator, registry *lnmux.InvoiceRegistry) (
 	}, nil
 }
 
+func (s *server) GetInfo(ctx context.Context,
+	req *lnmuxrpc.GetInfoRequest) (*lnmuxrpc.GetInfoResponse,
+	error) {
+
+	var nodes []*lnmuxrpc.NodeInfo
+	for _, key := range s.creator.NodePubKeys() {
+		nodes = append(nodes, &lnmuxrpc.NodeInfo{
+			PubKey: key.SerializeCompressed(),
+		})
+	}
+
+	network := s.creator.Network().Name
+
+	// Convert testnet3 to common name testnet.
+	if network == "testnet3" {
+		network = "testnet"
+	}
+
+	return &lnmuxrpc.GetInfoResponse{
+		AutoSettle: s.registry.AutoSettle(),
+		Nodes:      nodes,
+		PubKey:     s.creator.PubKey().SerializeCompressed(),
+		Network:    network,
+	}, nil
+}
+
 func marshallInvoiceState(state persistence.InvoiceState) lnmuxrpc.SubscribeSingleInvoiceResponse_InvoiceState {
 	switch state {
 

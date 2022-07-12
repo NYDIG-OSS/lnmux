@@ -62,6 +62,23 @@ func NewInvoiceCreator(cfg *InvoiceCreatorConfig) (*InvoiceCreator, error) {
 	}, nil
 }
 
+func (c *InvoiceCreator) NodePubKeys() []*btcec.PublicKey {
+	return c.gwPubKeys
+}
+
+func (c *InvoiceCreator) Network() *chaincfg.Params {
+	return c.activeNetParams
+}
+
+func (c *InvoiceCreator) PubKey() *btcec.PublicKey {
+	key, err := c.keyRing.DeriveKey(keychain.KeyLocator{})
+	if err != nil {
+		panic(err)
+	}
+
+	return key.PubKey
+}
+
 // TODO: Add description hash.
 func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 	memo string, descHash *lntypes.Hash, cltvDelta uint64) (

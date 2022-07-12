@@ -5,6 +5,8 @@ package lnmux;
 option go_package = "github.com/bottlepay/lnmux/lnmuxrpc";
 
 service Service {
+    rpc GetInfo (GetInfoRequest) returns (GetInfoResponse);
+
     rpc AddInvoice (AddInvoiceRequest) returns (AddInvoiceResponse);
 
     rpc SubscribeSingleInvoice (SubscribeSingleInvoiceRequest) returns (stream SubscribeSingleInvoiceResponse);
@@ -14,6 +16,19 @@ service Service {
     rpc SettleInvoice (SettleInvoiceRequest) returns (SettleInvoiceResponse);
 
     rpc CancelInvoice (CancelInvoiceRequest) returns (CancelInvoiceResponse);
+}
+
+message GetInfoRequest {}
+
+message GetInfoResponse {
+    bytes pub_key = 1;
+    string network = 2;
+    repeated NodeInfo nodes = 3;
+    bool auto_settle = 4;
+}
+
+message NodeInfo {
+    bytes pub_key = 1;
 }
 
 message AddInvoiceRequest {
