@@ -14,6 +14,7 @@ import (
 	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/lnrpc/chainrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
+	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/record"
 	"github.com/lightningnetwork/lnd/routing/route"
 	"github.com/stretchr/testify/require"
@@ -147,6 +148,21 @@ func TestMux(t *testing.T) {
 		require.Equal(t, state, update.State)
 	}
 
+	var acceptChan = make(chan lntypes.Hash, 1)
+	cancelAcceptSubscription, err := registry.SubscribeAccept(func(hash lntypes.Hash) {
+		logger.Sugar().Infow("Payment accepted", "hash", hash)
+
+		acceptChan <- hash
+	})
+	require.NoError(t, err)
+
+	expectAccept := func(expectedHash lntypes.Hash) {
+		t.Helper()
+
+		hash := <-acceptChan
+		require.Equal(t, expectedHash, hash)
+	}
+
 	// Send initial block heights.
 	blockChan1 <- &chainrpc.BlockEpoch{Height: 1000}
 	blockChan2 <- &chainrpc.BlockEpoch{Height: 1000}
@@ -216,6 +232,7 @@ func TestMux(t *testing.T) {
 	// Notify arrival of part 2.
 	htlcChan2 <- receiveHtlc(2, 4000)
 
+	expectAccept(testHash)
 	expectUpdate(persistence.InvoiceStateAccepted)
 	require.NoError(t, registry.RequestSettle(testHash))
 
@@ -261,6 +278,7 @@ func TestMux(t *testing.T) {
 
 	htlcChan1 <- receiveHtlc(20, 15000)
 
+	expectAccept(testHash)
 	expectUpdate(persistence.InvoiceStateAccepted)
 	require.NoError(t, registry.RequestSettle(testHash))
 
@@ -271,6 +289,7 @@ func TestMux(t *testing.T) {
 	expectUpdate(persistence.InvoiceStateSettled)
 
 	cancelSubscription()
+	cancelAcceptSubscription()
 
 	cancel()
 	require.NoError(t, <-errChan)

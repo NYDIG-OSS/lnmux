@@ -74,6 +74,7 @@ type RegistryConfig struct {
 }
 
 type InvoiceCallback func(update InvoiceUpdate)
+type AcceptCallback func(lntypes.Hash)
 
 type invoiceState struct {
 	invoice       *types.InvoiceCreationData
@@ -104,9 +105,9 @@ type invoiceSubscription struct {
 	id       int
 }
 
-type invoiceSubscriptionCancelRequest struct {
-	hash lntypes.Hash
-	id   int
+type invoiceAcceptSubscription struct {
+	callback AcceptCallback
+	id       int
 }
 
 // InvoiceRegistry is a central registry of all the outstanding invoices
@@ -133,7 +134,10 @@ type InvoiceRegistry struct {
 	logger          *zap.SugaredLogger
 
 	newInvoiceSubscription    chan invoiceSubscription
-	cancelInvoiceSubscription chan invoiceSubscriptionCancelRequest
+	cancelInvoiceSubscription chan int
+
+	newInvoiceAcceptSubscription    chan invoiceAcceptSubscription
+	cancelInvoiceAcceptSubscription chan int
 
 	subscriptionManager *subscriptionManager
 
@@ -148,17 +152,19 @@ func NewRegistry(cdb *persistence.PostgresPersister,
 	cfg *RegistryConfig) *InvoiceRegistry {
 
 	return &InvoiceRegistry{
-		cdb:                       cdb,
-		hodlSubscriptions:         make(map[types.CircuitKey][]func(HtlcResolution)),
-		cfg:                       cfg,
-		invoices:                  make(map[lntypes.Hash]*invoiceState),
-		htlcChan:                  make(chan *registryHtlc),
-		newInvoiceSubscription:    make(chan invoiceSubscription),
-		cancelInvoiceSubscription: make(chan invoiceSubscriptionCancelRequest),
-		subscriptionManager:       newSubscriptionManager(cfg.Logger),
-		requestSettleChan:         make(chan *invoiceRequest),
-		cancelChan:                make(chan *invoiceRequest),
-		quit:                      make(chan struct{}),
+		cdb:                             cdb,
+		hodlSubscriptions:               make(map[types.CircuitKey][]func(HtlcResolution)),
+		cfg:                             cfg,
+		invoices:                        make(map[lntypes.Hash]*invoiceState),
+		htlcChan:                        make(chan *registryHtlc),
+		newInvoiceSubscription:          make(chan invoiceSubscription),
+		cancelInvoiceSubscription:       make(chan int),
+		newInvoiceAcceptSubscription:    make(chan invoiceAcceptSubscription),
+		cancelInvoiceAcceptSubscription: make(chan int),
+		subscriptionManager:             newSubscriptionManager(cfg.Logger),
+		requestSettleChan:               make(chan *invoiceRequest),
+		cancelChan:                      make(chan *invoiceRequest),
+		quit:                            make(chan struct{}),
 
 		logger:          cfg.Logger,
 		autoReleaseHeap: &queue.PriorityQueue{},
@@ -205,10 +211,35 @@ func (i *InvoiceRegistry) Subscribe(hash lntypes.Hash,
 		logger.Debugw("Removing subscriber")
 
 		select {
-		case i.cancelInvoiceSubscription <- invoiceSubscriptionCancelRequest{
-			id:   subscriberId,
-			hash: hash,
-		}:
+		case i.cancelInvoiceSubscription <- subscriberId:
+		case <-i.quit:
+		}
+	}, nil
+}
+
+func (i *InvoiceRegistry) SubscribeAccept(callback AcceptCallback) (
+	func(), error) {
+
+	subscriberId := i.subscriptionManager.generateSubscriptionId()
+	logger := i.logger.With("id", subscriberId)
+
+	logger.Debugw("Adding subscriber")
+
+	select {
+	case i.newInvoiceAcceptSubscription <- invoiceAcceptSubscription{
+		callback: callback,
+		id:       subscriberId,
+	}:
+
+	case <-i.quit:
+		return nil, ErrShuttingDown
+	}
+
+	return func() {
+		logger.Debugw("Removing subscriber")
+
+		select {
+		case i.cancelInvoiceAcceptSubscription <- subscriberId:
 		case <-i.quit:
 		}
 	}, nil
@@ -325,8 +356,17 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 				return err
 			}
 
-		case request := <-i.cancelInvoiceSubscription:
-			i.subscriptionManager.deleteSubscription(request.hash, request.id)
+		case newAcceptSubscription := <-i.newInvoiceAcceptSubscription:
+			err := i.addAcceptSubscriber(ctx, newAcceptSubscription)
+			if err != nil {
+				return err
+			}
+
+		case id := <-i.cancelInvoiceSubscription:
+			i.subscriptionManager.deleteSubscription(id)
+
+		case id := <-i.cancelInvoiceAcceptSubscription:
+			i.subscriptionManager.deleteAcceptSubscription(id)
 
 		case req := <-i.requestSettleChan:
 			sendResponse := func(err error) error {
@@ -467,6 +507,27 @@ func (i *InvoiceRegistry) addSubscriber(ctx context.Context,
 	}
 
 	newSubscription.callback(update)
+
+	return nil
+}
+
+func (i *InvoiceRegistry) addAcceptSubscriber(ctx context.Context,
+	newSubscription invoiceAcceptSubscription) error {
+
+	// Store subscriber for future updates.
+	i.subscriptionManager.addAcceptSubscription(
+		newSubscription.id, newSubscription.callback,
+	)
+
+	// Send accepted invoices from memory.
+	for hash, invoiceState := range i.invoices {
+		// No event for partially accepted invoices.
+		if !invoiceState.isSetComplete() {
+			continue
+		}
+
+		newSubscription.callback(hash)
+	}
 
 	return nil
 }

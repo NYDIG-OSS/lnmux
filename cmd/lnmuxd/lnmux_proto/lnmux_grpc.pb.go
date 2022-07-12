@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion7
 type ServiceClient interface {
 	AddInvoice(ctx context.Context, in *AddInvoiceRequest, opts ...grpc.CallOption) (*AddInvoiceResponse, error)
 	SubscribeSingleInvoice(ctx context.Context, in *SubscribeSingleInvoiceRequest, opts ...grpc.CallOption) (Service_SubscribeSingleInvoiceClient, error)
+	SubscribePaymentAccepted(ctx context.Context, in *SubscribePaymentAcceptedRequest, opts ...grpc.CallOption) (Service_SubscribePaymentAcceptedClient, error)
 	SettleInvoice(ctx context.Context, in *SettleInvoiceRequest, opts ...grpc.CallOption) (*SettleInvoiceResponse, error)
 	CancelInvoice(ctx context.Context, in *CancelInvoiceRequest, opts ...grpc.CallOption) (*CancelInvoiceResponse, error)
 }
@@ -73,6 +74,38 @@ func (x *serviceSubscribeSingleInvoiceClient) Recv() (*SubscribeSingleInvoiceRes
 	return m, nil
 }
 
+func (c *serviceClient) SubscribePaymentAccepted(ctx context.Context, in *SubscribePaymentAcceptedRequest, opts ...grpc.CallOption) (Service_SubscribePaymentAcceptedClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Service_ServiceDesc.Streams[1], "/lnmux.Service/SubscribePaymentAccepted", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &serviceSubscribePaymentAcceptedClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Service_SubscribePaymentAcceptedClient interface {
+	Recv() (*SubscribePaymentAcceptedResponse, error)
+	grpc.ClientStream
+}
+
+type serviceSubscribePaymentAcceptedClient struct {
+	grpc.ClientStream
+}
+
+func (x *serviceSubscribePaymentAcceptedClient) Recv() (*SubscribePaymentAcceptedResponse, error) {
+	m := new(SubscribePaymentAcceptedResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *serviceClient) SettleInvoice(ctx context.Context, in *SettleInvoiceRequest, opts ...grpc.CallOption) (*SettleInvoiceResponse, error) {
 	out := new(SettleInvoiceResponse)
 	err := c.cc.Invoke(ctx, "/lnmux.Service/SettleInvoice", in, out, opts...)
@@ -97,6 +130,7 @@ func (c *serviceClient) CancelInvoice(ctx context.Context, in *CancelInvoiceRequ
 type ServiceServer interface {
 	AddInvoice(context.Context, *AddInvoiceRequest) (*AddInvoiceResponse, error)
 	SubscribeSingleInvoice(*SubscribeSingleInvoiceRequest, Service_SubscribeSingleInvoiceServer) error
+	SubscribePaymentAccepted(*SubscribePaymentAcceptedRequest, Service_SubscribePaymentAcceptedServer) error
 	SettleInvoice(context.Context, *SettleInvoiceRequest) (*SettleInvoiceResponse, error)
 	CancelInvoice(context.Context, *CancelInvoiceRequest) (*CancelInvoiceResponse, error)
 	mustEmbedUnimplementedServiceServer()
@@ -111,6 +145,9 @@ func (UnimplementedServiceServer) AddInvoice(context.Context, *AddInvoiceRequest
 }
 func (UnimplementedServiceServer) SubscribeSingleInvoice(*SubscribeSingleInvoiceRequest, Service_SubscribeSingleInvoiceServer) error {
 	return status.Errorf(codes.Unimplemented, "method SubscribeSingleInvoice not implemented")
+}
+func (UnimplementedServiceServer) SubscribePaymentAccepted(*SubscribePaymentAcceptedRequest, Service_SubscribePaymentAcceptedServer) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribePaymentAccepted not implemented")
 }
 func (UnimplementedServiceServer) SettleInvoice(context.Context, *SettleInvoiceRequest) (*SettleInvoiceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SettleInvoice not implemented")
@@ -167,6 +204,27 @@ type serviceSubscribeSingleInvoiceServer struct {
 }
 
 func (x *serviceSubscribeSingleInvoiceServer) Send(m *SubscribeSingleInvoiceResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _Service_SubscribePaymentAccepted_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribePaymentAcceptedRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ServiceServer).SubscribePaymentAccepted(m, &serviceSubscribePaymentAcceptedServer{stream})
+}
+
+type Service_SubscribePaymentAcceptedServer interface {
+	Send(*SubscribePaymentAcceptedResponse) error
+	grpc.ServerStream
+}
+
+type serviceSubscribePaymentAcceptedServer struct {
+	grpc.ServerStream
+}
+
+func (x *serviceSubscribePaymentAcceptedServer) Send(m *SubscribePaymentAcceptedResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -230,6 +288,11 @@ var Service_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "SubscribeSingleInvoice",
 			Handler:       _Service_SubscribeSingleInvoice_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "SubscribePaymentAccepted",
+			Handler:       _Service_SubscribePaymentAccepted_Handler,
 			ServerStreams: true,
 		},
 	},

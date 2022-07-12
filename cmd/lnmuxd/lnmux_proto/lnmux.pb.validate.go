@@ -321,6 +321,144 @@ var _ interface {
 	ErrorName() string
 } = SubscribeSingleInvoiceResponseValidationError{}
 
+// Validate checks the field values on SubscribePaymentAcceptedRequest with the
+// rules defined in the proto definition for this message. If any rules are
+// violated, an error is returned.
+func (m *SubscribePaymentAcceptedRequest) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	return nil
+}
+
+// SubscribePaymentAcceptedRequestValidationError is the validation error
+// returned by SubscribePaymentAcceptedRequest.Validate if the designated
+// constraints aren't met.
+type SubscribePaymentAcceptedRequestValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e SubscribePaymentAcceptedRequestValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e SubscribePaymentAcceptedRequestValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e SubscribePaymentAcceptedRequestValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e SubscribePaymentAcceptedRequestValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e SubscribePaymentAcceptedRequestValidationError) ErrorName() string {
+	return "SubscribePaymentAcceptedRequestValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e SubscribePaymentAcceptedRequestValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sSubscribePaymentAcceptedRequest.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = SubscribePaymentAcceptedRequestValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = SubscribePaymentAcceptedRequestValidationError{}
+
+// Validate checks the field values on SubscribePaymentAcceptedResponse with
+// the rules defined in the proto definition for this message. If any rules
+// are violated, an error is returned.
+func (m *SubscribePaymentAcceptedResponse) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	// no validation rules for Hash
+
+	return nil
+}
+
+// SubscribePaymentAcceptedResponseValidationError is the validation error
+// returned by SubscribePaymentAcceptedResponse.Validate if the designated
+// constraints aren't met.
+type SubscribePaymentAcceptedResponseValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e SubscribePaymentAcceptedResponseValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e SubscribePaymentAcceptedResponseValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e SubscribePaymentAcceptedResponseValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e SubscribePaymentAcceptedResponseValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e SubscribePaymentAcceptedResponseValidationError) ErrorName() string {
+	return "SubscribePaymentAcceptedResponseValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e SubscribePaymentAcceptedResponseValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sSubscribePaymentAcceptedResponse.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = SubscribePaymentAcceptedResponseValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = SubscribePaymentAcceptedResponseValidationError{}
+
 // Validate checks the field values on SettleInvoiceRequest with the rules
 // defined in the proto definition for this message. If any rules are
 // violated, an error is returned.

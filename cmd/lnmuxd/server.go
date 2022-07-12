@@ -61,14 +61,30 @@ func (s *server) SubscribeSingleInvoice(req *lnmux_proto.SubscribeSingleInvoiceR
 		return err
 	}
 
+	return streamBuffered(
+		subscription.Context(),
+		func(cb func(lnmux.InvoiceUpdate)) (func(), error) {
+			return s.registry.Subscribe(hash, cb)
+		},
+		func(update lnmux.InvoiceUpdate) error {
+			return subscription.Send(&lnmux_proto.SubscribeSingleInvoiceResponse{
+				State: marshallInvoiceState(update.State),
+			})
+		},
+	)
+}
+
+func streamBuffered[T any](ctx context.Context,
+	subscribe func(func(T)) (func(), error),
+	send func(T) error) error {
+
 	var (
-		updateChan = make(chan lnmux.InvoiceUpdate, subscriberQueueSize)
+		bufferChan = make(chan T, subscriberQueueSize)
 		closed     = false
 	)
 
-	cancel, err := s.registry.Subscribe(
-		hash,
-		func(update lnmux.InvoiceUpdate) {
+	cancel, err := subscribe(
+		func(item T) {
 			// Don't try to write if the channel is closed. This callback does
 			// not need to be thread-safe.
 			if closed {
@@ -76,19 +92,19 @@ func (s *server) SubscribeSingleInvoice(req *lnmux_proto.SubscribeSingleInvoiceR
 			}
 
 			select {
-			case updateChan <- update:
+			case bufferChan <- item:
 
 			// When the context is cancelled, close the update channel. We don't
 			// want to skip this update and on the next one send into the
 			// channel again.
-			case <-subscription.Context().Done():
-				close(updateChan)
+			case <-ctx.Done():
+				close(bufferChan)
 				closed = true
 
 			// When the update channel is full, terminate the subscriber to
 			// prevent blocking multiplexer.
 			default:
-				close(updateChan)
+				close(bufferChan)
 				closed = true
 			}
 		},
@@ -101,23 +117,37 @@ func (s *server) SubscribeSingleInvoice(req *lnmux_proto.SubscribeSingleInvoiceR
 	for {
 		select {
 
-		case <-subscription.Context().Done():
+		case <-ctx.Done():
 			return nil
 
-		case update, ok := <-updateChan:
+		case item, ok := <-bufferChan:
 			// If the channel gets closed, disconnect the client.
 			if !ok {
 				return errors.New("buffer overflow")
 			}
 
-			err := subscription.Send(&lnmux_proto.SubscribeSingleInvoiceResponse{
-				State: marshallInvoiceState(update.State),
-			})
+			err := send(item)
 			if err != nil {
 				return err
 			}
 		}
 	}
+}
+
+func (s *server) SubscribePaymentAccepted(req *lnmux_proto.SubscribePaymentAcceptedRequest,
+	subscription lnmux_proto.Service_SubscribePaymentAcceptedServer) error {
+
+	return streamBuffered(
+		subscription.Context(),
+		func(cb func(lntypes.Hash)) (func(), error) {
+			return s.registry.SubscribeAccept(cb)
+		},
+		func(hash lntypes.Hash) error {
+			return subscription.Send(&lnmux_proto.SubscribePaymentAcceptedResponse{
+				Hash: hash[:],
+			})
+		},
+	)
 }
 
 func (s *server) AddInvoice(ctx context.Context,
