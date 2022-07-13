@@ -33,6 +33,223 @@ var (
 	_ = anypb.Any{}
 )
 
+// Validate checks the field values on GetInfoRequest with the rules defined in
+// the proto definition for this message. If any rules are violated, an error
+// is returned.
+func (m *GetInfoRequest) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	return nil
+}
+
+// GetInfoRequestValidationError is the validation error returned by
+// GetInfoRequest.Validate if the designated constraints aren't met.
+type GetInfoRequestValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e GetInfoRequestValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e GetInfoRequestValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e GetInfoRequestValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e GetInfoRequestValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e GetInfoRequestValidationError) ErrorName() string { return "GetInfoRequestValidationError" }
+
+// Error satisfies the builtin error interface
+func (e GetInfoRequestValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sGetInfoRequest.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = GetInfoRequestValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = GetInfoRequestValidationError{}
+
+// Validate checks the field values on GetInfoResponse with the rules defined
+// in the proto definition for this message. If any rules are violated, an
+// error is returned.
+func (m *GetInfoResponse) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	// no validation rules for PubKey
+
+	// no validation rules for Network
+
+	for idx, item := range m.GetNodes() {
+		_, _ = idx, item
+
+		if v, ok := interface{}(item).(interface{ Validate() error }); ok {
+			if err := v.Validate(); err != nil {
+				return GetInfoResponseValidationError{
+					field:  fmt.Sprintf("Nodes[%v]", idx),
+					reason: "embedded message failed validation",
+					cause:  err,
+				}
+			}
+		}
+
+	}
+
+	// no validation rules for AutoSettle
+
+	return nil
+}
+
+// GetInfoResponseValidationError is the validation error returned by
+// GetInfoResponse.Validate if the designated constraints aren't met.
+type GetInfoResponseValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e GetInfoResponseValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e GetInfoResponseValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e GetInfoResponseValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e GetInfoResponseValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e GetInfoResponseValidationError) ErrorName() string { return "GetInfoResponseValidationError" }
+
+// Error satisfies the builtin error interface
+func (e GetInfoResponseValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sGetInfoResponse.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = GetInfoResponseValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = GetInfoResponseValidationError{}
+
+// Validate checks the field values on NodeInfo with the rules defined in the
+// proto definition for this message. If any rules are violated, an error is returned.
+func (m *NodeInfo) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	// no validation rules for PubKey
+
+	return nil
+}
+
+// NodeInfoValidationError is the validation error returned by
+// NodeInfo.Validate if the designated constraints aren't met.
+type NodeInfoValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e NodeInfoValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e NodeInfoValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e NodeInfoValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e NodeInfoValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e NodeInfoValidationError) ErrorName() string { return "NodeInfoValidationError" }
+
+// Error satisfies the builtin error interface
+func (e NodeInfoValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sNodeInfo.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = NodeInfoValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = NodeInfoValidationError{}
+
 // Validate checks the field values on AddInvoiceRequest with the rules defined
 // in the proto definition for this message. If any rules are violated, an
 // error is returned.

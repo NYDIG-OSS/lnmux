@@ -192,6 +192,10 @@ func (i *InvoiceRegistry) Run(ctx context.Context) error {
 	return nil
 }
 
+func (i *InvoiceRegistry) AutoSettle() bool {
+	return i.cfg.AutoSettle
+}
+
 func (i *InvoiceRegistry) Subscribe(hash lntypes.Hash,
 	callback InvoiceCallback) (func(), error) {
 
