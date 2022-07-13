@@ -18,6 +18,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/go-pg/pg/v10"
 	"github.com/lightningnetwork/lnd/clock"
+	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/urfave/cli/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -54,6 +55,14 @@ func runAction(c *cli.Context) error {
 
 	keyRing := lnmux.NewKeyRing(identityKey)
 
+	// Log identity key.
+	pubKey, _ := keyRing.DeriveKey(keychain.KeyLocator{})
+	keyBytes := pubKey.PubKey.SerializeCompressed()
+	key, _ := common.NewPubKeyFromBytes(keyBytes)
+	log.Infow("Mux starting",
+		"key", key,
+		"network", activeNetParams.Name)
+
 	// Get a new creator instance.
 	var gwPubKeys []common.PubKey
 	for _, lnd := range lnds {
@@ -63,7 +72,7 @@ func runAction(c *cli.Context) error {
 		&lnmux.InvoiceCreatorConfig{
 			KeyRing:         keyRing,
 			GwPubKeys:       gwPubKeys,
-			ActiveNetParams: &chaincfg.RegressionNetParams,
+			ActiveNetParams: activeNetParams,
 		},
 	)
 	if err != nil {
