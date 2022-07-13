@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/bottlepay/lnmux"
-	"github.com/bottlepay/lnmux/cmd/lnmuxd/lnmux_proto"
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
+	"github.com/bottlepay/lnmux/lnmuxrpc"
 	"github.com/bottlepay/lnmux/persistence"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/go-pg/pg/v10"
@@ -128,7 +128,7 @@ func runAction(c *cli.Context) error {
 		return err
 	}
 
-	lnmux_proto.RegisterServiceServer(
+	lnmuxrpc.RegisterServiceServer(
 		grpcServer, server,
 	)
 
