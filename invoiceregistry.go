@@ -31,10 +31,6 @@ var (
 	// invoice registry is shutting down.
 	ErrShuttingDown = errors.New("invoice registry shutting down")
 
-	// ErrInvoiceNotFound is returned when the invoice is unknown to the invoice
-	// registry.
-	ErrInvoiceNotFound = errors.New("invoice not found")
-
 	// ErrAutoSettling is returned when a settle request is made in
 	// auto-settle mode.
 	ErrAutoSettling = errors.New("lnmux is in auto-settle mode")
@@ -384,7 +380,7 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			// Retrieve invoice.
 			state, ok := i.invoices[req.hash]
 			if !ok {
-				if err := sendResponse(ErrInvoiceNotFound); err != nil {
+				if err := sendResponse(types.ErrInvoiceNotFound); err != nil {
 					return err
 				}
 
@@ -426,7 +422,7 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			// Retrieve invoice.
 			state, ok := i.invoices[req.hash]
 			if !ok {
-				err := i.sendResponse(req.errChan, ErrInvoiceNotFound)
+				err := i.sendResponse(req.errChan, types.ErrInvoiceNotFound)
 				if err != nil {
 					return err
 				}
