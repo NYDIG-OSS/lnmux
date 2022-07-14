@@ -800,15 +800,6 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		"amtMsat", statelessData.amtMsat, "expiry", statelessData.expiry,
 	)
 
-	// Check expiry.
-	if statelessData.expiry.Before(time.Now()) {
-		logger.Infow("Stateless invoice payment to expired invoice")
-
-		h.resolve(NewFailResolution(ResultInvoiceExpired))
-
-		return nil
-	}
-
 	// Check that the total amt of the htlc set is matching the invoice
 	// amount. We don't accept overpayment.
 	if mpp.TotalMsat() != lnwire.MilliSatoshi(statelessData.amtMsat) {
@@ -838,6 +829,16 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		}
 
 		setTotal = int64(state.totalSetAmt())
+	}
+
+	// Check expiry. Do this after handling re-accepts. We only want to apply
+	// this check to new htlcs.
+	if statelessData.expiry.Before(time.Now()) {
+		logger.Infow("Stateless invoice payment to expired invoice")
+
+		h.resolve(NewFailResolution(ResultInvoiceExpired))
+
+		return nil
 	}
 
 	// Add amount of new htlc.
