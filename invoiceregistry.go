@@ -846,19 +846,6 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 
 			return nil
 		}
-
-		// Sanity check that the total amount and expiry time are identical.
-		if statelessData.amtMsat != int64(state.invoice.Value) ||
-			statelessData.expiry != state.expiry {
-
-			logger.Errorw("Stateless invoice sanity check failed",
-				"expectedAmtMsat", state.invoice.Value, "amtMsat", statelessData.amtMsat,
-				"expectedExpiry", state.expiry, "expiry", statelessData.expiry)
-
-			h.resolve(NewFailResolution(ResultInvoiceNotFound))
-
-			return nil
-		}
 	}
 
 	// Add amount of new htlc.
