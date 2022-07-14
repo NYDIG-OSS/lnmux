@@ -823,20 +823,10 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 
 	// Look up this invoice in memory. If it is present, we have already
 	// received other shards of the payment.
-	state, ok := i.invoices[h.rHash]
-	if !ok {
-		state = &invoiceState{
-			invoice: &types.InvoiceCreationData{
-				PaymentPreimage: statelessData.preimage,
-				Value:           lnwire.MilliSatoshi(statelessData.amtMsat),
-				PaymentAddr:     mpp.PaymentAddr(),
-			},
-			acceptedHtlcs: make(map[types.CircuitKey]*InvoiceHTLC),
-			expiry:        statelessData.expiry,
-		}
+	var setTotal int64
 
-		i.invoices[h.rHash] = state
-	} else {
+	state, invoiceExists := i.invoices[h.rHash]
+	if invoiceExists {
 		// Handle re-accepts.
 		if _, ok := state.acceptedHtlcs[h.circuitKey]; ok {
 			i.logger.Debugf("Htlc re-accepted: hash=%v, amt=%v, expiry=%v, circuit=%v, mpp=%v",
@@ -846,10 +836,12 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 
 			return nil
 		}
+
+		setTotal = int64(state.totalSetAmt())
 	}
 
 	// Add amount of new htlc.
-	newSetTotal := lnwire.MilliSatoshi(state.totalSetAmt()) + h.amtPaid
+	newSetTotal := lnwire.MilliSatoshi(setTotal) + h.amtPaid
 
 	// Make sure the communicated set total isn't overpaid.
 	if newSetTotal > mpp.TotalMsat() {
@@ -869,6 +861,22 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		return nil
 	}
 
+	// We are going to accept this htlc. Create in-memory state if that didn't
+	// exist yet.
+	if !invoiceExists {
+		state = &invoiceState{
+			invoice: &types.InvoiceCreationData{
+				PaymentPreimage: statelessData.preimage,
+				Value:           lnwire.MilliSatoshi(statelessData.amtMsat),
+				PaymentAddr:     mpp.PaymentAddr(),
+			},
+			acceptedHtlcs: make(map[types.CircuitKey]*InvoiceHTLC),
+			expiry:        statelessData.expiry,
+		}
+
+		i.invoices[h.rHash] = state
+	}
+
 	state.acceptedHtlcs[h.circuitKey] = &InvoiceHTLC{
 		Amt:         h.amtPaid,
 		MppTotalAmt: mpp.TotalMsat(),
@@ -880,8 +888,7 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		h.rHash, h.amtPaid, h.expiry, h.circuitKey, mpp)
 
 	// If the invoice cannot be settled yet, only record the htlc.
-	setComplete := newSetTotal == mpp.TotalMsat()
-	if !setComplete {
+	if !state.isSetComplete() {
 		// Start a release timer for this htlc. We release either after the hold
 		// duration has passed or the invoice expires - whichever comes first.
 		releaseTime := time.Now().Add(i.cfg.HtlcHoldDuration)
