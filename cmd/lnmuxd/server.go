@@ -7,6 +7,7 @@ import (
 	"github.com/bottlepay/lnmux"
 	"github.com/bottlepay/lnmux/lnmuxrpc"
 	"github.com/bottlepay/lnmux/persistence"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -235,9 +236,9 @@ func (s *server) SettleInvoice(ctx context.Context,
 
 	err = s.registry.RequestSettle(hash)
 	switch {
-	case err == lnmux.ErrInvoiceNotFound:
+	case err == types.ErrInvoiceNotFound:
 		return nil, status.Error(
-			codes.NotFound, lnmux.ErrInvoiceNotFound.Error(),
+			codes.NotFound, types.ErrInvoiceNotFound.Error(),
 		)
 
 	case err == lnmux.ErrAutoSettling:
@@ -263,8 +264,14 @@ func (s *server) CancelInvoice(ctx context.Context,
 
 	err = s.registry.CancelInvoice(hash)
 	switch {
-	case err == lnmux.ErrInvoiceNotFound:
-		return nil, status.Error(codes.NotFound, lnmux.ErrInvoiceNotFound.Error())
+	case err == types.ErrInvoiceNotFound:
+		return nil, status.Error(codes.NotFound, err.Error())
+
+	case err == lnmux.ErrInvoiceAlreadySettled:
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+
+	case err == lnmux.ErrSettleRequested:
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
 
 	case err != nil:
 		return nil, status.Errorf(codes.Internal, err.Error())
