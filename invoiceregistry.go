@@ -809,6 +809,16 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		return nil
 	}
 
+	// Check that the total amt of the htlc set is matching the invoice
+	// amount. We don't accept overpayment.
+	if mpp.TotalMsat() != lnwire.MilliSatoshi(statelessData.amtMsat) {
+		h.resolve(NewFailResolution(
+			ResultHtlcSetTotalMismatch,
+		))
+
+		return nil
+	}
+
 	logger.Infow("Stateless invoice payment received")
 
 	// Look up this invoice in memory. If it is present, we have already
@@ -851,32 +861,8 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		}
 	}
 
-	inv := state.invoice
-
-	// Check that the total amt of the htlc set is matching the invoice
-	// amount. We don't accept overpayment.
-	if mpp.TotalMsat() != inv.Value {
-		h.resolve(NewFailResolution(
-			ResultHtlcSetOverpayment,
-		))
-
-		return nil
-	}
-
-	// Check whether total amt matches other htlcs in the set.
-	var newSetTotal lnwire.MilliSatoshi
-	for _, htlc := range state.acceptedHtlcs {
-		if mpp.TotalMsat() != htlc.MppTotalAmt {
-			h.resolve(NewFailResolution(ResultHtlcSetTotalMismatch))
-
-			return nil
-		}
-
-		newSetTotal += htlc.Amt
-	}
-
 	// Add amount of new htlc.
-	newSetTotal += h.amtPaid
+	newSetTotal := lnwire.MilliSatoshi(state.totalSetAmt()) + h.amtPaid
 
 	// Make sure the communicated set total isn't overpaid.
 	if newSetTotal > mpp.TotalMsat() {
