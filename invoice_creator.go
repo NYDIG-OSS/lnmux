@@ -104,14 +104,14 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 	}
 
 	expiryTime := creationDate.Add(expiry)
-	statelessData, err := encodeStatelessData(
+	paymentAddr, preimage, err := encodeStatelessData(
 		privKey.Serialize(), amtMSat, expiryTime,
 	)
 	if err != nil {
 		return nil, lntypes.Preimage{}, err
 	}
 
-	paymentHash := statelessData.preimage.Hash()
+	paymentHash := preimage.Hash()
 
 	// TODO: Optionally we could encrypt the payment metadata here, just like
 	// rust-lightning does:
@@ -166,7 +166,7 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 	options = append(options, zpay32.Features(invoiceFeatures))
 
 	// Set the payment address.
-	options = append(options, zpay32.PaymentAddr(statelessData.paymentAddr))
+	options = append(options, zpay32.PaymentAddr(paymentAddr))
 
 	// Create and encode the payment request as a bech32 (zpay32) string.
 
@@ -191,10 +191,10 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 		PaymentRequest: payReqString,
 		InvoiceCreationData: types.InvoiceCreationData{
 			Value:           lnwire.MilliSatoshi(amtMSat),
-			PaymentPreimage: statelessData.preimage,
-			PaymentAddr:     statelessData.paymentAddr,
+			PaymentPreimage: preimage,
+			PaymentAddr:     paymentAddr,
 		},
 	}
 
-	return newInvoice, statelessData.preimage, nil
+	return newInvoice, preimage, nil
 }

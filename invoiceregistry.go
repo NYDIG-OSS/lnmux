@@ -819,7 +819,7 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 			invoice: &types.InvoiceCreationData{
 				PaymentPreimage: statelessData.preimage,
 				Value:           lnwire.MilliSatoshi(statelessData.amtMsat),
-				PaymentAddr:     statelessData.paymentAddr,
+				PaymentAddr:     mpp.PaymentAddr(),
 			},
 			acceptedHtlcs: make(map[types.CircuitKey]*InvoiceHTLC),
 			expiry:        statelessData.expiry,
