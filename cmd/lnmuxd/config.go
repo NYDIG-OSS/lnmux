@@ -10,6 +10,8 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+var DefaultListenAddress = "localhost:19090"
+
 type Config struct {
 	// Lnd contains the configuration of the nodes.
 	Lnd LndConfig `yaml:"lnd"`
@@ -22,6 +24,9 @@ type Config struct {
 
 	// AutoSettle indicates that payments should be accepted automatically.
 	AutoSettle bool `yaml:"autoSettle"`
+
+	// ListenAddress is the network address that we listen on.
+	ListenAddress string `yaml:"listenAddress"`
 }
 
 func (c *Config) GetIdentityKey() ([32]byte, error) {
