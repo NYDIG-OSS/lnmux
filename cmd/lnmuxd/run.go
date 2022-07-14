@@ -139,7 +139,12 @@ func runAction(c *cli.Context) error {
 		grpcServer, server,
 	)
 
-	grpcInternalListener, err := net.Listen("tcp", ":19090")
+	listenAddress := cfg.ListenAddress
+	if listenAddress == "" {
+		listenAddress = DefaultListenAddress
+	}
+
+	grpcInternalListener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return err
 	}
@@ -148,7 +153,7 @@ func runAction(c *cli.Context) error {
 	go func() {
 		defer wg.Done()
 
-		log.Infow("Grpc server startin on port 19090")
+		log.Infow("Grpc server starting", "listenAddress", listenAddress)
 		err := grpcServer.Serve(grpcInternalListener)
 		if err != nil && err != grpc.ErrServerStopped {
 			log.Errorw("grpc server error", "err", err)
