@@ -852,15 +852,6 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 
 	inv := state.invoice
 
-	// Check the payment address that authorizes the payment.
-	if mpp.PaymentAddr() != inv.PaymentAddr {
-		h.resolve(NewFailResolution(
-			ResultAddressMismatch,
-		))
-
-		return nil
-	}
-
 	// Check that the total amt of the htlc set is matching the invoice
 	// amount. We don't accept overpayment.
 	if mpp.TotalMsat() != inv.Value {
