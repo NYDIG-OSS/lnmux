@@ -827,6 +827,16 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 
 		i.invoices[h.rHash] = state
 	} else {
+		// Handle re-accepts.
+		if _, ok := state.acceptedHtlcs[h.circuitKey]; ok {
+			i.logger.Debugf("Htlc re-accepted: hash=%v, amt=%v, expiry=%v, circuit=%v, mpp=%v",
+				h.rHash, h.amtPaid, h.expiry, h.circuitKey, mpp)
+
+			i.hodlSubscribe(h.resolve, h.circuitKey)
+
+			return nil
+		}
+
 		// Sanity check that the total amount and expiry time are identical.
 		if statelessData.amtMsat != int64(state.invoice.Value) ||
 			statelessData.expiry != state.expiry {
@@ -839,15 +849,6 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 
 			return nil
 		}
-	}
-
-	if _, ok := state.acceptedHtlcs[h.circuitKey]; ok {
-		i.logger.Debugf("Htlc re-accepted: hash=%v, amt=%v, expiry=%v, circuit=%v, mpp=%v",
-			h.rHash, h.amtPaid, h.expiry, h.circuitKey, mpp)
-
-		i.hodlSubscribe(h.resolve, h.circuitKey)
-
-		return nil
 	}
 
 	inv := state.invoice
