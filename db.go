@@ -6,7 +6,6 @@ import (
 
 	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
-	"github.com/lightningnetwork/lnd/lnwire"
 )
 
 var (
@@ -59,16 +58,6 @@ type Invoice struct {
 	// PaymentRequest is the encoded payment request for this invoice. For
 	// spontaneous (keysend) payments, this field will be empty.
 	PaymentRequest string
-}
-
-// InvoiceHTLC contains details about an htlc paying to this invoice.
-type InvoiceHTLC struct {
-	// Amt is the amount that is carried by this htlc.
-	Amt lnwire.MilliSatoshi
-
-	// MppTotalAmt is a field for mpp that indicates the expected total
-	// amount.
-	MppTotalAmt lnwire.MilliSatoshi
 }
 
 func newCircuitKeyFromRPC(key *routerrpc.CircuitKey) types.CircuitKey {
