@@ -112,9 +112,9 @@ If you've set up `lnmuxd` correctly, output similar to what is shown below is ex
 
 ![](invoice_lifecycle.png)
 
-Note that only the states `accepted`, `settle requested` and `settled` are published to callers of the `SubscribeSingleInvoice` rpc.
+Note that only the states `accepted`, `settle requested` and `settled` are published to callers of the `SubscribeSingleInvoice` rpc. Lnmux isn't aware of open invoices because it is stateless.
 
-The transition from `settle requested` to `settled` is marked as `[future]`. This transition is happening already, but not backed by an actual final settle event from lnd. See https://github.com/lightningnetwork/lnd/issues/6208.
+The transition from `settle requested` to `settled` can be made more robust in the future. This transition is happening already, but not backed by an actual final settle event from lnd. See https://github.com/lightningnetwork/lnd/issues/6208.
 
 ## Regtest testing
 
