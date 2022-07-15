@@ -51,17 +51,27 @@ func createTestLndClient(ctrl *gomock.Controller, pubKey common.PubKey) (
 	htlcChan := make(chan *routerrpc.ForwardHtlcInterceptRequest)
 	responseChan := make(chan *routerrpc.ForwardHtlcInterceptResponse, 1)
 	lndClient.EXPECT().HtlcInterceptor(gomock.Any()).
-		Return(
-			func(response *routerrpc.ForwardHtlcInterceptResponse) error {
-				responseChan <- response
+		DoAndReturn(func(ctx context.Context) (
+			func(*routerrpc.ForwardHtlcInterceptResponse) error,
+			func() (*routerrpc.ForwardHtlcInterceptRequest, error),
+			error) {
 
-				return nil
-			},
-			func() (*routerrpc.ForwardHtlcInterceptRequest, error) {
-				return <-htlcChan, nil
-			},
-			nil,
-		)
+			return func(response *routerrpc.ForwardHtlcInterceptResponse) error {
+					responseChan <- response
+
+					return nil
+				},
+				func() (*routerrpc.ForwardHtlcInterceptRequest, error) {
+					select {
+					case htlc := <-htlcChan:
+						return htlc, nil
+
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				},
+				nil
+		})
 
 	blockChan := make(chan *chainrpc.BlockEpoch)
 	lndClient.EXPECT().RegisterBlockEpochNtfn(gomock.Any()).
