@@ -9,15 +9,8 @@ import (
 	"github.com/lightningnetwork/lnd/lntypes"
 )
 
-type statelessData struct {
-	amtMsat     int64
-	expiry      time.Time
-	preimage    lntypes.Preimage
-	paymentAddr [32]byte
-}
-
 func encodeStatelessData(privKey []byte, amtMsat int64, expiry time.Time) (
-	*statelessData, error) {
+	[32]byte, lntypes.Preimage, error) {
 
 	// We'll use part of the payment address to store the stateless invoice
 	// properties.
@@ -27,7 +20,7 @@ func encodeStatelessData(privKey []byte, amtMsat int64, expiry time.Time) (
 	// introduced to thwart probing attacks and 16 bytes still provide plenty of
 	// protection.
 	if _, err := rand.Read(addr[:16]); err != nil {
-		return nil, err
+		return [32]byte{}, lntypes.Preimage{}, err
 	}
 
 	// Store the expiry time in the payment address.
@@ -47,15 +40,16 @@ func encodeStatelessData(privKey []byte, amtMsat int64, expiry time.Time) (
 
 	paymentPreimage, err := lntypes.MakePreimage(preimageBytes)
 	if err != nil {
-		return nil, err
+		return [32]byte{}, lntypes.Preimage{}, err
 	}
 
-	return &statelessData{
-		amtMsat:     amtMsat,
-		expiry:      expiry,
-		preimage:    paymentPreimage,
-		paymentAddr: addr,
-	}, nil
+	return addr, paymentPreimage, nil
+}
+
+type statelessData struct {
+	amtMsat  int64
+	expiry   time.Time
+	preimage lntypes.Preimage
 }
 
 func decodeStatelessData(privKey []byte, paymentAddr [32]byte) (
@@ -75,9 +69,8 @@ func decodeStatelessData(privKey []byte, paymentAddr [32]byte) (
 	amtMsat := byteOrder.Uint64(paymentAddr[24:32])
 
 	return &statelessData{
-		amtMsat:     int64(amtMsat),
-		expiry:      expiry,
-		paymentAddr: paymentAddr,
-		preimage:    paymentPreimage,
+		amtMsat:  int64(amtMsat),
+		expiry:   expiry,
+		preimage: paymentPreimage,
 	}, nil
 }

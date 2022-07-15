@@ -78,24 +78,6 @@ type RegistryConfig struct {
 type InvoiceCallback func(update InvoiceUpdate)
 type AcceptCallback func(lntypes.Hash)
 
-type invoiceState struct {
-	invoice       *types.InvoiceCreationData
-	acceptedHtlcs map[types.CircuitKey]*InvoiceHTLC
-	expiry        time.Time
-}
-
-func (i *invoiceState) totalSetAmt() int {
-	total := 0
-	for _, htlc := range i.acceptedHtlcs {
-		total += int(htlc.Amt)
-	}
-	return total
-}
-
-func (i *invoiceState) isSetComplete() bool {
-	return i.totalSetAmt() == int(i.invoice.Value)
-}
-
 type invoiceRequest struct {
 	hash    lntypes.Hash
 	errChan chan error
@@ -127,7 +109,7 @@ type InvoiceRegistry struct {
 	// It is used for efficient notification of links.
 	hodlSubscriptions map[types.CircuitKey][]func(HtlcResolution)
 
-	invoices          map[lntypes.Hash]*invoiceState
+	sets              htlcSets
 	htlcChan          chan *registryHtlc
 	requestSettleChan chan *invoiceRequest
 	cancelChan        chan *invoiceRequest
@@ -157,7 +139,7 @@ func NewRegistry(cdb *persistence.PostgresPersister,
 		cdb:                             cdb,
 		hodlSubscriptions:               make(map[types.CircuitKey][]func(HtlcResolution)),
 		cfg:                             cfg,
-		invoices:                        make(map[lntypes.Hash]*invoiceState),
+		sets:                            newHtlcSets(),
 		htlcChan:                        make(chan *registryHtlc),
 		newInvoiceSubscription:          make(chan invoiceSubscription),
 		cancelInvoiceSubscription:       make(chan int),
@@ -380,7 +362,7 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			}
 
 			// Retrieve invoice.
-			state, ok := i.invoices[req.hash]
+			set, ok := i.sets.get(req.hash)
 			if !ok {
 				// The invoice is not in the accepted state. Check the database
 				// to see if it was already settled or requested to be settled.
@@ -419,7 +401,7 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			}
 
 			// Store settle request in database.
-			err := i.markSettleRequested(ctx, state)
+			err := i.markSettleRequested(ctx, set)
 
 			// In both error and success cases, notify request thread of
 			// outcome.
@@ -434,14 +416,14 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			}
 
 			// Send settle signal to lnd node(s).
-			err = i.requestSettle(ctx, state)
+			err = i.requestSettle(ctx, set)
 			if err != nil {
 				return err
 			}
 
 		case req := <-i.cancelChan:
 			// Retrieve invoice.
-			state, ok := i.invoices[req.hash]
+			set, ok := i.sets.get(req.hash)
 			if !ok {
 				// The invoice is not in the accepted state. Check the database
 				// to see if it was already settled or requested to be settled.
@@ -473,16 +455,14 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 
 			// Delete in-memory record for this invoice. Only open invoices are
 			// kept in memory.
-			delete(i.invoices, req.hash)
-
-			// Notify subscribers that the htlcs should be settled
-			// with our peer.
-			for key := range state.acceptedHtlcs {
+			set.deleteAll(func(key types.CircuitKey) {
+				// Notify subscribers that the htlcs should be settled
+				// with our peer.
 				resolution := NewFailResolution(
 					ResultInvoiceNotOpen,
 				)
 				i.notifyHodlSubscribers(key, resolution)
-			}
+			})
 
 			// Send success response.
 			err := i.sendResponse(req.errChan, nil)
@@ -523,10 +503,10 @@ func (i *InvoiceRegistry) addSubscriber(ctx context.Context,
 	// Send open or accepted invoice from memory.
 	var update InvoiceUpdate
 
-	invoiceState, ok := i.invoices[hash]
+	set, ok := i.sets.get(hash)
 	if ok {
 		// No event for partially accepted invoices.
-		if !invoiceState.isSetComplete() {
+		if !set.isComplete() {
 			return nil
 		}
 
@@ -565,14 +545,14 @@ func (i *InvoiceRegistry) addAcceptSubscriber(ctx context.Context,
 	)
 
 	// Send accepted invoices from memory.
-	for hash, invoiceState := range i.invoices {
+	i.sets.forEach(func(set htlcSet) {
 		// No event for partially accepted invoices.
-		if !invoiceState.isSetComplete() {
-			continue
+		if !set.isComplete() {
+			return
 		}
 
-		newSubscription.callback(hash)
-	}
+		newSubscription.callback(set.hash())
+	})
 
 	return nil
 }
@@ -583,7 +563,7 @@ func (i *InvoiceRegistry) failInvoice(ctx context.Context,
 	logger := i.logger.With("hash", hash)
 
 	// Retrieve invoice.
-	state, ok := i.invoices[hash]
+	set, ok := i.sets.get(hash)
 	if !ok {
 		logger.Debugw("Invoice to fail no longer open/accepted")
 
@@ -591,12 +571,9 @@ func (i *InvoiceRegistry) failInvoice(ctx context.Context,
 	}
 
 	// Cancel all accepted htlcs.
-	for key := range state.acceptedHtlcs {
+	set.deleteAll(func(key types.CircuitKey) {
 		i.notifyHodlSubscribers(key, NewFailResolution(ResultInvoiceExpired))
-	}
-
-	// Remove from memory because invoice is no longer open.
-	delete(i.invoices, hash)
+	})
 
 	logger.Infow("Failed invoice")
 
@@ -648,32 +625,21 @@ func (i *InvoiceRegistry) startHtlcTimer(hash lntypes.Hash,
 func (i *InvoiceRegistry) cancelSingleHtlc(hash lntypes.Hash,
 	key types.CircuitKey, result FailResolutionResult) error {
 
-	// Do nothing if the invoice has already been settled.
-	invoice, ok := i.invoices[hash]
+	// Do nothing if the set has already been settled.
+	set, ok := i.sets.get(hash)
 	if !ok {
 		return nil
 	}
 
 	// Do nothing if the set is already complete.
-	if invoice.isSetComplete() {
+	if set.isComplete() {
 		return nil
-	}
-
-	_, ok = invoice.acceptedHtlcs[key]
-	if !ok {
-		return fmt.Errorf("cancelSingleHtlc: htlc %v on invoice %v "+
-			"not accepted", key, hash)
 	}
 
 	i.logger.Debugf("cancelSingleHtlc: cancelling htlc %v on invoice %v",
 		key, hash)
 
-	delete(invoice.acceptedHtlcs, key)
-
-	// If this was the last htlc, clean up the in-memory record.
-	if len(invoice.acceptedHtlcs) == 0 {
-		delete(i.invoices, hash)
-	}
+	set.deleteHtlc(key)
 
 	i.notifyHodlSubscribers(key, NewFailResolution(result))
 
@@ -800,11 +766,12 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		"amtMsat", statelessData.amtMsat, "expiry", statelessData.expiry,
 	)
 
-	// Check expiry.
-	if statelessData.expiry.Before(time.Now()) {
-		logger.Infow("Stateless invoice payment to expired invoice")
-
-		h.resolve(NewFailResolution(ResultInvoiceExpired))
+	// Check that the total amt of the htlc set is matching the invoice
+	// amount. We don't accept overpayment.
+	if mpp.TotalMsat() != lnwire.MilliSatoshi(statelessData.amtMsat) {
+		h.resolve(NewFailResolution(
+			ResultHtlcSetTotalMismatch,
+		))
 
 		return nil
 	}
@@ -813,78 +780,35 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 
 	// Look up this invoice in memory. If it is present, we have already
 	// received other shards of the payment.
-	state, ok := i.invoices[h.rHash]
-	if !ok {
-		state = &invoiceState{
-			invoice: &types.InvoiceCreationData{
-				PaymentPreimage: statelessData.preimage,
-				Value:           lnwire.MilliSatoshi(statelessData.amtMsat),
-				PaymentAddr:     statelessData.paymentAddr,
-			},
-			acceptedHtlcs: make(map[types.CircuitKey]*InvoiceHTLC),
-			expiry:        statelessData.expiry,
-		}
+	var setTotal int64
 
-		i.invoices[h.rHash] = state
-	} else {
-		// Sanity check that the total amount and expiry time are identical.
-		if statelessData.amtMsat != int64(state.invoice.Value) ||
-			statelessData.expiry != state.expiry {
+	set, setExists := i.sets.get(h.rHash)
+	if setExists {
+		// Handle re-accepts.
+		if set.accepted(h.circuitKey) {
+			i.logger.Debugf("Htlc re-accepted: hash=%v, amt=%v, expiry=%v, circuit=%v, mpp=%v",
+				h.rHash, h.amtPaid, h.expiry, h.circuitKey, mpp)
 
-			logger.Errorw("Stateless invoice sanity check failed",
-				"expectedAmtMsat", state.invoice.Value, "amtMsat", statelessData.amtMsat,
-				"expectedExpiry", state.expiry, "expiry", statelessData.expiry)
-
-			h.resolve(NewFailResolution(ResultInvoiceNotFound))
-
-			return nil
-		}
-	}
-
-	if _, ok := state.acceptedHtlcs[h.circuitKey]; ok {
-		i.logger.Debugf("Htlc re-accepted: hash=%v, amt=%v, expiry=%v, circuit=%v, mpp=%v",
-			h.rHash, h.amtPaid, h.expiry, h.circuitKey, mpp)
-
-		i.hodlSubscribe(h.resolve, h.circuitKey)
-
-		return nil
-	}
-
-	inv := state.invoice
-
-	// Check the payment address that authorizes the payment.
-	if mpp.PaymentAddr() != inv.PaymentAddr {
-		h.resolve(NewFailResolution(
-			ResultAddressMismatch,
-		))
-
-		return nil
-	}
-
-	// Check that the total amt of the htlc set is matching the invoice
-	// amount. We don't accept overpayment.
-	if mpp.TotalMsat() != inv.Value {
-		h.resolve(NewFailResolution(
-			ResultHtlcSetOverpayment,
-		))
-
-		return nil
-	}
-
-	// Check whether total amt matches other htlcs in the set.
-	var newSetTotal lnwire.MilliSatoshi
-	for _, htlc := range state.acceptedHtlcs {
-		if mpp.TotalMsat() != htlc.MppTotalAmt {
-			h.resolve(NewFailResolution(ResultHtlcSetTotalMismatch))
+			i.hodlSubscribe(h.resolve, h.circuitKey)
 
 			return nil
 		}
 
-		newSetTotal += htlc.Amt
+		setTotal = set.totalSetAmt()
+	}
+
+	// Check expiry. Do this after handling re-accepts. We only want to apply
+	// this check to new htlcs.
+	if statelessData.expiry.Before(time.Now()) {
+		logger.Infow("Stateless invoice payment to expired invoice")
+
+		h.resolve(NewFailResolution(ResultInvoiceExpired))
+
+		return nil
 	}
 
 	// Add amount of new htlc.
-	newSetTotal += h.amtPaid
+	newSetTotal := lnwire.MilliSatoshi(setTotal) + h.amtPaid
 
 	// Make sure the communicated set total isn't overpaid.
 	if newSetTotal > mpp.TotalMsat() {
@@ -904,9 +828,19 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		return nil
 	}
 
-	state.acceptedHtlcs[h.circuitKey] = &InvoiceHTLC{
-		Amt:         h.amtPaid,
-		MppTotalAmt: mpp.TotalMsat(),
+	// We are going to accept this htlc. Create in-memory state if that didn't
+	// exist yet.
+	if !setExists {
+		set = i.sets.add(
+			&htlcSetParameters{
+				preimage:    statelessData.preimage,
+				value:       statelessData.amtMsat,
+				paymentAddr: mpp.PaymentAddr(),
+			},
+			h.circuitKey, int64(h.amtPaid),
+		)
+	} else {
+		set.addHtlc(h.circuitKey, int64(h.amtPaid))
 	}
 
 	i.hodlSubscribe(h.resolve, h.circuitKey)
@@ -915,8 +849,7 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		h.rHash, h.amtPaid, h.expiry, h.circuitKey, mpp)
 
 	// If the invoice cannot be settled yet, only record the htlc.
-	setComplete := newSetTotal == mpp.TotalMsat()
-	if !setComplete {
+	if !set.isComplete() {
 		// Start a release timer for this htlc. We release either after the hold
 		// duration has passed or the invoice expires - whichever comes first.
 		releaseTime := time.Now().Add(i.cfg.HtlcHoldDuration)
@@ -941,11 +874,11 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	if i.cfg.AutoSettle {
 		i.logger.Debugw("Auto-settling", "hash", h.rHash)
 
-		if err := i.markSettleRequested(ctx, state); err != nil {
+		if err := i.markSettleRequested(ctx, set); err != nil {
 			return err
 		}
 
-		if err := i.requestSettle(ctx, state); err != nil {
+		if err := i.requestSettle(ctx, set); err != nil {
 			return err
 		}
 	}
@@ -958,22 +891,20 @@ type InvoiceUpdate struct {
 }
 
 func (i *InvoiceRegistry) requestSettle(ctx context.Context,
-	state *invoiceState) error {
+	set htlcSet) error {
 
-	hash := state.invoice.PaymentPreimage.Hash()
+	hash := set.hash()
 
 	// Delete in-memory record for this invoice. Only open invoices are
 	// kept in memory.
-	delete(i.invoices, hash)
-
-	// Notify subscribers that the htlcs should be settled
-	// with our peer.
-	for key := range state.acceptedHtlcs {
+	set.deleteAll(func(key types.CircuitKey) {
+		// Notify subscribers that the htlcs should be settled
+		// with our peer.
 		htlcSettleResolution := NewSettleResolution(
-			state.invoice.PaymentPreimage, ResultSettled,
+			set.preimage(), ResultSettled,
 		)
 		i.notifyHodlSubscribers(key, htlcSettleResolution)
-	}
+	})
 
 	// TODO: Wait for final settle event from lnd. Unfortunately this
 	// event is not yet implemented.
@@ -995,19 +926,16 @@ func (i *InvoiceRegistry) requestSettle(ctx context.Context,
 }
 
 func (i *InvoiceRegistry) markSettleRequested(ctx context.Context,
-	state *invoiceState) error {
+	set htlcSet) error {
 
-	hash := state.invoice.PaymentPreimage.Hash()
+	hash := set.hash()
 
 	// Check whether the set is still complete.
-	var setTotal lnwire.MilliSatoshi
-	for _, htlc := range state.acceptedHtlcs {
-		setTotal += htlc.Amt
-	}
-	if setTotal != state.invoice.Value {
+	setTotal := set.totalSetAmt()
+	if setTotal != set.value() {
 		i.logger.Infow("Set no longer complete",
 			"setTotal", setTotal,
-			"invoiceValue", state.invoice.Value)
+			"invoiceValue", set.value())
 
 		return errors.New("set no longer complete")
 	}
@@ -1017,16 +945,13 @@ func (i *InvoiceRegistry) markSettleRequested(ctx context.Context,
 
 	// Store settle request in database. This is important to prevent partial
 	// settles after a restart.
-	htlcMap := make(map[types.CircuitKey]int64)
-	for key, htlc := range state.acceptedHtlcs {
-		htlcMap[key] = int64(htlc.Amt)
-	}
+	htlcMap := set.getHtlcMap()
 
 	invoice := &persistence.InvoiceCreationData{
 		InvoiceCreationData: types.InvoiceCreationData{
-			Value:           state.invoice.Value,
-			PaymentPreimage: state.invoice.PaymentPreimage,
-			PaymentAddr:     state.invoice.PaymentAddr,
+			Value:           lnwire.MilliSatoshi(set.value()),
+			PaymentPreimage: set.preimage(),
+			PaymentAddr:     set.paymentAddr(),
 		},
 	}
 
