@@ -874,6 +874,8 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	if i.cfg.AutoSettle {
 		i.logger.Debugw("Auto-settling", "hash", h.rHash)
 
+		// The set is complete and we go straight to markSettleRequested. This
+		// means that this call cannot fail because htlcs timed out.
 		if err := i.markSettleRequested(ctx, set); err != nil {
 			return err
 		}

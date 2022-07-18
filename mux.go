@@ -3,10 +3,8 @@ package lnmux
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	sphinx "github.com/lightningnetwork/lightning-onion"
@@ -21,10 +19,6 @@ import (
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
 	"github.com/bottlepay/lnmux/types"
-)
-
-const (
-	resolutionQueueSize = 100
 )
 
 type Mux struct {
@@ -117,194 +111,26 @@ type interceptedHtlcResponse struct {
 	failureCode    lnrpc.Failure_FailureCode
 }
 
-func (p *Mux) interceptHtlcs(ctx context.Context,
-	lnd lnd.LndClient, htlcChan chan *interceptedHtlc, heightChan chan int) {
+func (p *Mux) run(mainCtx context.Context) error {
+	ctx, cancel := context.WithCancel(mainCtx)
+	defer cancel()
 
-	var pubKey = lnd.PubKey()
+	var wg sync.WaitGroup
+	defer wg.Wait()
 
-	logger := p.logger.With("node", pubKey)
-
-	start := func(ctx context.Context) error {
-		streamCtx, streamCancel := context.WithCancel(ctx)
-		defer streamCancel()
-
-		send, recv, err := lnd.HtlcInterceptor(streamCtx)
-		if err != nil {
-			return err
-		}
-
-		logger.Debugw("Starting htlc interception")
-
-		// Register for block notifications.
-		blockChan, blockErrChan, err := lnd.RegisterBlockEpochNtfn(streamCtx)
-		if err != nil {
-			return err
-		}
-
-		// The block stream immediately sends the current block. Read that to
-		// set our initial height.
-		select {
-		case block := <-blockChan:
-			logger.Debugw("Initial block height", "height", block.Height)
-			heightChan <- int(block.Height)
-
-		case <-streamCtx.Done():
-			return streamCtx.Err()
-		}
-
-		var (
-			errChan   = make(chan error, 1)
-			replyChan = make(
-				chan *routerrpc.ForwardHtlcInterceptResponse,
-				resolutionQueueSize,
-			)
-			replyChanClosed bool
-		)
-
-		var wg sync.WaitGroup
-		defer wg.Wait()
-		wg.Add(1)
-
-		go func(ctx context.Context) {
-			defer wg.Done()
-
-			for {
-				htlc, err := recv()
-				if err != nil {
-					errChan <- err
-
-					return
-				}
-
-				hash, err := lntypes.MakeHash(htlc.PaymentHash)
-				if err != nil {
-					errChan <- err
-
-					return
-				}
-
-				reply := func(resp *interceptedHtlcResponse) error {
-					// Don't try to write if the channel is closed. This
-					// callback does not need to be thread-safe.
-					if replyChanClosed {
-						return errors.New("reply channel closed")
-					}
-
-					rpcResp := &routerrpc.ForwardHtlcInterceptResponse{
-						IncomingCircuitKey: htlc.IncomingCircuitKey,
-						Action:             resp.action,
-						Preimage:           resp.preimage[:],
-						FailureMessage:     resp.failureMessage,
-						FailureCode:        resp.failureCode,
-					}
-
-					select {
-					case replyChan <- rpcResp:
-						return nil
-
-					// When the context is cancelled, close the reply channel.
-					// We don't want to skip this reply and on the next one send
-					// into the channel again.
-					case <-ctx.Done():
-						close(replyChan)
-						replyChanClosed = true
-
-						return ctx.Err()
-
-					// When the update channel is full, terminate the subscriber
-					// to prevent blocking multiplexer.
-					default:
-						close(replyChan)
-						replyChanClosed = true
-
-						return errors.New("reply channel full")
-					}
-				}
-
-				circuitKey := newCircuitKeyFromRPC(htlc.IncomingCircuitKey)
-
-				select {
-				case htlcChan <- &interceptedHtlc{
-					source:         pubKey,
-					circuitKey:     circuitKey,
-					hash:           hash,
-					onionBlob:      htlc.OnionBlob,
-					amountMsat:     int64(htlc.OutgoingAmountMsat),
-					expiry:         htlc.OutgoingExpiry,
-					outgoingChanID: htlc.OutgoingRequestedChanId,
-					reply:          reply,
-				}:
-
-				case <-streamCtx.Done():
-					errChan <- streamCtx.Err()
-
-					return
-				}
-			}
-		}(ctx)
-
-		for {
-			select {
-			case err := <-errChan:
-				return fmt.Errorf("stream error: %w", err)
-
-			case block := <-blockChan:
-				select {
-				case heightChan <- int(block.Height):
-
-				case <-streamCtx.Done():
-					return streamCtx.Err()
-				}
-
-			case rpcResp, ok := <-replyChan:
-				if !ok {
-					return errors.New("reply channel full")
-				}
-
-				err := send(rpcResp)
-				if err != nil {
-					return fmt.Errorf(
-						"cannot send: %w", err)
-				}
-
-			case err := <-blockErrChan:
-				return fmt.Errorf("block error: %w", err)
-
-			case <-streamCtx.Done():
-				return streamCtx.Err()
-			}
-		}
-	}
-
-	go func(ctx context.Context) {
-		defer logger.Debugw("Exiting interceptor loop")
-
-		for {
-			err := start(ctx)
-			if err == nil || err == context.Canceled {
-				return
-			}
-
-			logger.Infow("Htlc interceptor error",
-				"err", err)
-
-			select {
-			// Retry delay.
-			case <-time.After(time.Second):
-
-			case <-ctx.Done():
-				return
-			}
-		}
-	}(ctx)
-}
-
-func (p *Mux) run(ctx context.Context) error {
 	// Register for htlc interception and block events.
 	htlcChan := make(chan *interceptedHtlc)
 	heightChan := make(chan int)
+
 	for _, lnd := range p.lnd {
-		p.interceptHtlcs(ctx, lnd, htlcChan, heightChan)
+		interceptor := newInterceptor(lnd, p.logger, htlcChan, heightChan)
+
+		wg.Add(1)
+		go func(ctx context.Context) {
+			defer wg.Done()
+
+			interceptor.run(ctx)
+		}(ctx)
 	}
 
 	// All connected lnd nodes will immediately send the current block height.
