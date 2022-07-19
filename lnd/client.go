@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/bottlepay/lnmux/common"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/chainrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-
-	"github.com/bottlepay/lnmux/common"
 )
 
 //go:generate mockgen --destination=mock_lnd_client.go --self_package=github.com/bottlepay/lnmux/lnd --package=lnd github.com/bottlepay/lnmux/lnd LndClient
@@ -106,7 +105,7 @@ func NewLndClient(cfg Config) (LndClient, error) {
 			cfg.PubKey, pubKey)
 	}
 
-	logger.Infow("Succesfully connected to LND")
+	logger.Infow("Successfully connected to LND")
 
 	return client, nil
 }
@@ -138,6 +137,7 @@ func (l *lndClient) RegisterBlockEpochNtfn(ctx context.Context) (
 			event, err := stream.Recv()
 			if err != nil {
 				errChan <- err
+
 				return
 			}
 

@@ -130,10 +130,7 @@ func runAction(c *cli.Context) error {
 	grpcServer := grpc.NewServer()
 	reflection.Register(grpcServer)
 
-	server, err := newServer(creator, registry)
-	if err != nil {
-		return err
-	}
+	server := newServer(creator, registry)
 
 	lnmuxrpc.RegisterServiceServer(
 		grpcServer, server,

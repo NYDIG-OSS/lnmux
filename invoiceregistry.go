@@ -317,17 +317,12 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 
 			switch event := head.(type) {
 			case *htlcReleaseEvent:
-				err := i.cancelSingleHtlc(
+				i.cancelSingleHtlc(
 					event.hash, event.key, ResultMppTimeout,
 				)
-				if err != nil {
-					i.logger.Errorf("HTLC timer: %v", err)
-				}
 
 			case *acceptTimeoutEvent:
-				err := i.failInvoice(
-					ctx, event.hash,
-				)
+				err := i.failInvoice(event.hash)
 				if err != nil {
 					return err
 				}
@@ -345,7 +340,7 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			}
 
 		case newAcceptSubscription := <-i.newInvoiceAcceptSubscription:
-			err := i.addAcceptSubscriber(ctx, newAcceptSubscription)
+			err := i.addAcceptSubscriber(newAcceptSubscription)
 			if err != nil {
 				return err
 			}
@@ -536,7 +531,7 @@ func (i *InvoiceRegistry) addSubscriber(ctx context.Context,
 	return nil
 }
 
-func (i *InvoiceRegistry) addAcceptSubscriber(ctx context.Context,
+func (i *InvoiceRegistry) addAcceptSubscriber(
 	newSubscription invoiceAcceptSubscription) error {
 
 	// Store subscriber for future updates.
@@ -557,9 +552,7 @@ func (i *InvoiceRegistry) addAcceptSubscriber(ctx context.Context,
 	return nil
 }
 
-func (i *InvoiceRegistry) failInvoice(ctx context.Context,
-	hash lntypes.Hash) error {
-
+func (i *InvoiceRegistry) failInvoice(hash lntypes.Hash) error {
 	logger := i.logger.With("hash", hash)
 
 	// Retrieve invoice.
@@ -623,17 +616,17 @@ func (i *InvoiceRegistry) startHtlcTimer(hash lntypes.Hash,
 // a resolution result which will be used to notify subscribed links and
 // resolvers of the details of the htlc cancellation.
 func (i *InvoiceRegistry) cancelSingleHtlc(hash lntypes.Hash,
-	key types.CircuitKey, result FailResolutionResult) error {
+	key types.CircuitKey, result FailResolutionResult) {
 
 	// Do nothing if the set has already been settled.
 	set, ok := i.sets.get(hash)
 	if !ok {
-		return nil
+		return
 	}
 
 	// Do nothing if the set is already complete.
 	if set.isComplete() {
-		return nil
+		return
 	}
 
 	i.logger.Debugf("cancelSingleHtlc: cancelling htlc %v on invoice %v",
@@ -642,8 +635,6 @@ func (i *InvoiceRegistry) cancelSingleHtlc(hash lntypes.Hash,
 	set.deleteHtlc(key)
 
 	i.notifyHodlSubscribers(key, NewFailResolution(result))
-
-	return nil
 }
 
 // NotifyExitHopHtlc attempts to mark an invoice as settled. The return value

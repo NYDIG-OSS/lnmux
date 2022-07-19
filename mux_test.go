@@ -6,6 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bottlepay/lnmux/common"
+	"github.com/bottlepay/lnmux/lnd"
+	"github.com/bottlepay/lnmux/persistence"
+	"github.com/bottlepay/lnmux/persistence/test"
+	test_common "github.com/bottlepay/lnmux/test"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/go-pg/pg/v10"
@@ -19,12 +24,6 @@ import (
 	"github.com/lightningnetwork/lnd/routing/route"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-
-	"github.com/bottlepay/lnmux/common"
-	"github.com/bottlepay/lnmux/lnd"
-	"github.com/bottlepay/lnmux/persistence"
-	"github.com/bottlepay/lnmux/persistence/test"
-	test_common "github.com/bottlepay/lnmux/test"
 )
 
 var (

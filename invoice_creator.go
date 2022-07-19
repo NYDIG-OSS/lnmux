@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"time"
 
+	"github.com/bottlepay/lnmux/common"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/lightningnetwork/lnd/feature"
@@ -12,9 +14,6 @@ import (
 	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/lightningnetwork/lnd/netann"
 	"github.com/lightningnetwork/lnd/zpay32"
-
-	"github.com/bottlepay/lnmux/common"
-	"github.com/bottlepay/lnmux/types"
 )
 
 var byteOrder = binary.BigEndian

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/bottlepay/lnmux/common"
+	"github.com/bottlepay/lnmux/lnd"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/chaincfg"
 	sphinx "github.com/lightningnetwork/lightning-onion"
 	"github.com/lightningnetwork/lnd/htlcswitch/hop"
@@ -15,10 +18,6 @@ import (
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwire"
 	"go.uber.org/zap"
-
-	"github.com/bottlepay/lnmux/common"
-	"github.com/bottlepay/lnmux/lnd"
-	"github.com/bottlepay/lnmux/types"
 )
 
 type Mux struct {

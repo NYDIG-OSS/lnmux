@@ -20,6 +20,7 @@ func NewPubKeyFromBytes(b []byte) (PubKey, error) {
 
 	var v PubKey
 	copy(v[:], b)
+
 	return v, nil
 }
 

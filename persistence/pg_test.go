@@ -4,13 +4,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bottlepay/lnmux/persistence/test"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/go-pg/pg/v10"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-
-	"github.com/bottlepay/lnmux/persistence/test"
-	"github.com/bottlepay/lnmux/types"
 )
 
 func setupTestDB(t *testing.T) (*pg.DB, *PostgresPersister) {
