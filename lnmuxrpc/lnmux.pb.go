@@ -453,14 +453,14 @@ func (x *SubscribeSingleInvoiceResponse) GetState() SubscribeSingleInvoiceRespon
 	return SubscribeSingleInvoiceResponse_STATE_ACCEPTED
 }
 
-type SubscribePaymentAcceptedRequest struct {
+type SubscribeInvoiceAcceptedRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 }
 
-func (x *SubscribePaymentAcceptedRequest) Reset() {
-	*x = SubscribePaymentAcceptedRequest{}
+func (x *SubscribeInvoiceAcceptedRequest) Reset() {
+	*x = SubscribeInvoiceAcceptedRequest{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_lnmux_proto_msgTypes[7]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -468,13 +468,13 @@ func (x *SubscribePaymentAcceptedRequest) Reset() {
 	}
 }
 
-func (x *SubscribePaymentAcceptedRequest) String() string {
+func (x *SubscribeInvoiceAcceptedRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SubscribePaymentAcceptedRequest) ProtoMessage() {}
+func (*SubscribeInvoiceAcceptedRequest) ProtoMessage() {}
 
-func (x *SubscribePaymentAcceptedRequest) ProtoReflect() protoreflect.Message {
+func (x *SubscribeInvoiceAcceptedRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_lnmux_proto_msgTypes[7]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -486,12 +486,12 @@ func (x *SubscribePaymentAcceptedRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SubscribePaymentAcceptedRequest.ProtoReflect.Descriptor instead.
-func (*SubscribePaymentAcceptedRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use SubscribeInvoiceAcceptedRequest.ProtoReflect.Descriptor instead.
+func (*SubscribeInvoiceAcceptedRequest) Descriptor() ([]byte, []int) {
 	return file_lnmux_proto_rawDescGZIP(), []int{7}
 }
 
-type SubscribePaymentAcceptedResponse struct {
+type SubscribeInvoiceAcceptedResponse struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
@@ -499,8 +499,8 @@ type SubscribePaymentAcceptedResponse struct {
 	Hash []byte `protobuf:"bytes,1,opt,name=hash,proto3" json:"hash,omitempty"`
 }
 
-func (x *SubscribePaymentAcceptedResponse) Reset() {
-	*x = SubscribePaymentAcceptedResponse{}
+func (x *SubscribeInvoiceAcceptedResponse) Reset() {
+	*x = SubscribeInvoiceAcceptedResponse{}
 	if protoimpl.UnsafeEnabled {
 		mi := &file_lnmux_proto_msgTypes[8]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -508,13 +508,13 @@ func (x *SubscribePaymentAcceptedResponse) Reset() {
 	}
 }
 
-func (x *SubscribePaymentAcceptedResponse) String() string {
+func (x *SubscribeInvoiceAcceptedResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SubscribePaymentAcceptedResponse) ProtoMessage() {}
+func (*SubscribeInvoiceAcceptedResponse) ProtoMessage() {}
 
-func (x *SubscribePaymentAcceptedResponse) ProtoReflect() protoreflect.Message {
+func (x *SubscribeInvoiceAcceptedResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_lnmux_proto_msgTypes[8]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -526,12 +526,12 @@ func (x *SubscribePaymentAcceptedResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SubscribePaymentAcceptedResponse.ProtoReflect.Descriptor instead.
-func (*SubscribePaymentAcceptedResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use SubscribeInvoiceAcceptedResponse.ProtoReflect.Descriptor instead.
+func (*SubscribeInvoiceAcceptedResponse) Descriptor() ([]byte, []int) {
 	return file_lnmux_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *SubscribePaymentAcceptedResponse) GetHash() []byte {
+func (x *SubscribeInvoiceAcceptedResponse) GetHash() []byte {
 	if x != nil {
 		return x.Hash
 	}
@@ -757,10 +757,10 @@ var file_lnmux_proto_rawDesc = []byte{
 	0x0a, 0x16, 0x53, 0x54, 0x41, 0x54, 0x45, 0x5f, 0x53, 0x45, 0x54, 0x54, 0x4c, 0x45, 0x5f, 0x52,
 	0x45, 0x51, 0x55, 0x45, 0x53, 0x54, 0x45, 0x44, 0x10, 0x01, 0x12, 0x11, 0x0a, 0x0d, 0x53, 0x54,
 	0x41, 0x54, 0x45, 0x5f, 0x53, 0x45, 0x54, 0x54, 0x4c, 0x45, 0x44, 0x10, 0x02, 0x22, 0x21, 0x0a,
-	0x1f, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x50, 0x61, 0x79, 0x6d, 0x65, 0x6e,
-	0x74, 0x41, 0x63, 0x63, 0x65, 0x70, 0x74, 0x65, 0x64, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
-	0x22, 0x36, 0x0a, 0x20, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x50, 0x61, 0x79,
-	0x6d, 0x65, 0x6e, 0x74, 0x41, 0x63, 0x63, 0x65, 0x70, 0x74, 0x65, 0x64, 0x52, 0x65, 0x73, 0x70,
+	0x1f, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x49, 0x6e, 0x76, 0x6f, 0x69, 0x63,
+	0x65, 0x41, 0x63, 0x63, 0x65, 0x70, 0x74, 0x65, 0x64, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x22, 0x36, 0x0a, 0x20, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x49, 0x6e, 0x76,
+	0x6f, 0x69, 0x63, 0x65, 0x41, 0x63, 0x63, 0x65, 0x70, 0x74, 0x65, 0x64, 0x52, 0x65, 0x73, 0x70,
 	0x6f, 0x6e, 0x73, 0x65, 0x12, 0x12, 0x0a, 0x04, 0x68, 0x61, 0x73, 0x68, 0x18, 0x01, 0x20, 0x01,
 	0x28, 0x0c, 0x52, 0x04, 0x68, 0x61, 0x73, 0x68, 0x22, 0x2a, 0x0a, 0x14, 0x53, 0x65, 0x74, 0x74,
 	0x6c, 0x65, 0x49, 0x6e, 0x76, 0x6f, 0x69, 0x63, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
@@ -787,12 +787,12 @@ var file_lnmux_proto_rawDesc = []byte{
 	0x6d, 0x75, 0x78, 0x2e, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x53, 0x69, 0x6e,
 	0x67, 0x6c, 0x65, 0x49, 0x6e, 0x76, 0x6f, 0x69, 0x63, 0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
 	0x73, 0x65, 0x30, 0x01, 0x12, 0x6d, 0x0a, 0x18, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62,
-	0x65, 0x50, 0x61, 0x79, 0x6d, 0x65, 0x6e, 0x74, 0x41, 0x63, 0x63, 0x65, 0x70, 0x74, 0x65, 0x64,
+	0x65, 0x49, 0x6e, 0x76, 0x6f, 0x69, 0x63, 0x65, 0x41, 0x63, 0x63, 0x65, 0x70, 0x74, 0x65, 0x64,
 	0x12, 0x26, 0x2e, 0x6c, 0x6e, 0x6d, 0x75, 0x78, 0x2e, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69,
-	0x62, 0x65, 0x50, 0x61, 0x79, 0x6d, 0x65, 0x6e, 0x74, 0x41, 0x63, 0x63, 0x65, 0x70, 0x74, 0x65,
+	0x62, 0x65, 0x49, 0x6e, 0x76, 0x6f, 0x69, 0x63, 0x65, 0x41, 0x63, 0x63, 0x65, 0x70, 0x74, 0x65,
 	0x64, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x27, 0x2e, 0x6c, 0x6e, 0x6d, 0x75, 0x78,
-	0x2e, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x50, 0x61, 0x79, 0x6d, 0x65, 0x6e,
-	0x74, 0x41, 0x63, 0x63, 0x65, 0x70, 0x74, 0x65, 0x64, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x2e, 0x53, 0x75, 0x62, 0x73, 0x63, 0x72, 0x69, 0x62, 0x65, 0x49, 0x6e, 0x76, 0x6f, 0x69, 0x63,
+	0x65, 0x41, 0x63, 0x63, 0x65, 0x70, 0x74, 0x65, 0x64, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
 	0x65, 0x30, 0x01, 0x12, 0x4a, 0x0a, 0x0d, 0x53, 0x65, 0x74, 0x74, 0x6c, 0x65, 0x49, 0x6e, 0x76,
 	0x6f, 0x69, 0x63, 0x65, 0x12, 0x1b, 0x2e, 0x6c, 0x6e, 0x6d, 0x75, 0x78, 0x2e, 0x53, 0x65, 0x74,
 	0x74, 0x6c, 0x65, 0x49, 0x6e, 0x76, 0x6f, 0x69, 0x63, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73,
@@ -831,8 +831,8 @@ var file_lnmux_proto_goTypes = []interface{}{
 	(*AddInvoiceResponse)(nil),                       // 5: lnmux.AddInvoiceResponse
 	(*SubscribeSingleInvoiceRequest)(nil),            // 6: lnmux.SubscribeSingleInvoiceRequest
 	(*SubscribeSingleInvoiceResponse)(nil),           // 7: lnmux.SubscribeSingleInvoiceResponse
-	(*SubscribePaymentAcceptedRequest)(nil),          // 8: lnmux.SubscribePaymentAcceptedRequest
-	(*SubscribePaymentAcceptedResponse)(nil),         // 9: lnmux.SubscribePaymentAcceptedResponse
+	(*SubscribeInvoiceAcceptedRequest)(nil),          // 8: lnmux.SubscribeInvoiceAcceptedRequest
+	(*SubscribeInvoiceAcceptedResponse)(nil),         // 9: lnmux.SubscribeInvoiceAcceptedResponse
 	(*SettleInvoiceRequest)(nil),                     // 10: lnmux.SettleInvoiceRequest
 	(*SettleInvoiceResponse)(nil),                    // 11: lnmux.SettleInvoiceResponse
 	(*CancelInvoiceRequest)(nil),                     // 12: lnmux.CancelInvoiceRequest
@@ -844,13 +844,13 @@ var file_lnmux_proto_depIdxs = []int32{
 	1,  // 2: lnmux.Service.GetInfo:input_type -> lnmux.GetInfoRequest
 	4,  // 3: lnmux.Service.AddInvoice:input_type -> lnmux.AddInvoiceRequest
 	6,  // 4: lnmux.Service.SubscribeSingleInvoice:input_type -> lnmux.SubscribeSingleInvoiceRequest
-	8,  // 5: lnmux.Service.SubscribePaymentAccepted:input_type -> lnmux.SubscribePaymentAcceptedRequest
+	8,  // 5: lnmux.Service.SubscribeInvoiceAccepted:input_type -> lnmux.SubscribeInvoiceAcceptedRequest
 	10, // 6: lnmux.Service.SettleInvoice:input_type -> lnmux.SettleInvoiceRequest
 	12, // 7: lnmux.Service.CancelInvoice:input_type -> lnmux.CancelInvoiceRequest
 	2,  // 8: lnmux.Service.GetInfo:output_type -> lnmux.GetInfoResponse
 	5,  // 9: lnmux.Service.AddInvoice:output_type -> lnmux.AddInvoiceResponse
 	7,  // 10: lnmux.Service.SubscribeSingleInvoice:output_type -> lnmux.SubscribeSingleInvoiceResponse
-	9,  // 11: lnmux.Service.SubscribePaymentAccepted:output_type -> lnmux.SubscribePaymentAcceptedResponse
+	9,  // 11: lnmux.Service.SubscribeInvoiceAccepted:output_type -> lnmux.SubscribeInvoiceAcceptedResponse
 	11, // 12: lnmux.Service.SettleInvoice:output_type -> lnmux.SettleInvoiceResponse
 	13, // 13: lnmux.Service.CancelInvoice:output_type -> lnmux.CancelInvoiceResponse
 	8,  // [8:14] is the sub-list for method output_type
@@ -951,7 +951,7 @@ func file_lnmux_proto_init() {
 			}
 		}
 		file_lnmux_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SubscribePaymentAcceptedRequest); i {
+			switch v := v.(*SubscribeInvoiceAcceptedRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -963,7 +963,7 @@ func file_lnmux_proto_init() {
 			}
 		}
 		file_lnmux_proto_msgTypes[8].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*SubscribePaymentAcceptedResponse); i {
+			switch v := v.(*SubscribeInvoiceAcceptedResponse); i {
 			case 0:
 				return &v.state
 			case 1:

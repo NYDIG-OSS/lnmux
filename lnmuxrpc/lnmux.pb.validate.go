@@ -538,10 +538,10 @@ var _ interface {
 	ErrorName() string
 } = SubscribeSingleInvoiceResponseValidationError{}
 
-// Validate checks the field values on SubscribePaymentAcceptedRequest with the
+// Validate checks the field values on SubscribeInvoiceAcceptedRequest with the
 // rules defined in the proto definition for this message. If any rules are
 // violated, an error is returned.
-func (m *SubscribePaymentAcceptedRequest) Validate() error {
+func (m *SubscribeInvoiceAcceptedRequest) Validate() error {
 	if m == nil {
 		return nil
 	}
@@ -549,10 +549,10 @@ func (m *SubscribePaymentAcceptedRequest) Validate() error {
 	return nil
 }
 
-// SubscribePaymentAcceptedRequestValidationError is the validation error
-// returned by SubscribePaymentAcceptedRequest.Validate if the designated
+// SubscribeInvoiceAcceptedRequestValidationError is the validation error
+// returned by SubscribeInvoiceAcceptedRequest.Validate if the designated
 // constraints aren't met.
-type SubscribePaymentAcceptedRequestValidationError struct {
+type SubscribeInvoiceAcceptedRequestValidationError struct {
 	field  string
 	reason string
 	cause  error
@@ -560,24 +560,24 @@ type SubscribePaymentAcceptedRequestValidationError struct {
 }
 
 // Field function returns field value.
-func (e SubscribePaymentAcceptedRequestValidationError) Field() string { return e.field }
+func (e SubscribeInvoiceAcceptedRequestValidationError) Field() string { return e.field }
 
 // Reason function returns reason value.
-func (e SubscribePaymentAcceptedRequestValidationError) Reason() string { return e.reason }
+func (e SubscribeInvoiceAcceptedRequestValidationError) Reason() string { return e.reason }
 
 // Cause function returns cause value.
-func (e SubscribePaymentAcceptedRequestValidationError) Cause() error { return e.cause }
+func (e SubscribeInvoiceAcceptedRequestValidationError) Cause() error { return e.cause }
 
 // Key function returns key value.
-func (e SubscribePaymentAcceptedRequestValidationError) Key() bool { return e.key }
+func (e SubscribeInvoiceAcceptedRequestValidationError) Key() bool { return e.key }
 
 // ErrorName returns error name.
-func (e SubscribePaymentAcceptedRequestValidationError) ErrorName() string {
-	return "SubscribePaymentAcceptedRequestValidationError"
+func (e SubscribeInvoiceAcceptedRequestValidationError) ErrorName() string {
+	return "SubscribeInvoiceAcceptedRequestValidationError"
 }
 
 // Error satisfies the builtin error interface
-func (e SubscribePaymentAcceptedRequestValidationError) Error() string {
+func (e SubscribeInvoiceAcceptedRequestValidationError) Error() string {
 	cause := ""
 	if e.cause != nil {
 		cause = fmt.Sprintf(" | caused by: %v", e.cause)
@@ -589,14 +589,14 @@ func (e SubscribePaymentAcceptedRequestValidationError) Error() string {
 	}
 
 	return fmt.Sprintf(
-		"invalid %sSubscribePaymentAcceptedRequest.%s: %s%s",
+		"invalid %sSubscribeInvoiceAcceptedRequest.%s: %s%s",
 		key,
 		e.field,
 		e.reason,
 		cause)
 }
 
-var _ error = SubscribePaymentAcceptedRequestValidationError{}
+var _ error = SubscribeInvoiceAcceptedRequestValidationError{}
 
 var _ interface {
 	Field() string
@@ -604,12 +604,12 @@ var _ interface {
 	Key() bool
 	Cause() error
 	ErrorName() string
-} = SubscribePaymentAcceptedRequestValidationError{}
+} = SubscribeInvoiceAcceptedRequestValidationError{}
 
-// Validate checks the field values on SubscribePaymentAcceptedResponse with
+// Validate checks the field values on SubscribeInvoiceAcceptedResponse with
 // the rules defined in the proto definition for this message. If any rules
 // are violated, an error is returned.
-func (m *SubscribePaymentAcceptedResponse) Validate() error {
+func (m *SubscribeInvoiceAcceptedResponse) Validate() error {
 	if m == nil {
 		return nil
 	}
@@ -619,10 +619,10 @@ func (m *SubscribePaymentAcceptedResponse) Validate() error {
 	return nil
 }
 
-// SubscribePaymentAcceptedResponseValidationError is the validation error
-// returned by SubscribePaymentAcceptedResponse.Validate if the designated
+// SubscribeInvoiceAcceptedResponseValidationError is the validation error
+// returned by SubscribeInvoiceAcceptedResponse.Validate if the designated
 // constraints aren't met.
-type SubscribePaymentAcceptedResponseValidationError struct {
+type SubscribeInvoiceAcceptedResponseValidationError struct {
 	field  string
 	reason string
 	cause  error
@@ -630,24 +630,24 @@ type SubscribePaymentAcceptedResponseValidationError struct {
 }
 
 // Field function returns field value.
-func (e SubscribePaymentAcceptedResponseValidationError) Field() string { return e.field }
+func (e SubscribeInvoiceAcceptedResponseValidationError) Field() string { return e.field }
 
 // Reason function returns reason value.
-func (e SubscribePaymentAcceptedResponseValidationError) Reason() string { return e.reason }
+func (e SubscribeInvoiceAcceptedResponseValidationError) Reason() string { return e.reason }
 
 // Cause function returns cause value.
-func (e SubscribePaymentAcceptedResponseValidationError) Cause() error { return e.cause }
+func (e SubscribeInvoiceAcceptedResponseValidationError) Cause() error { return e.cause }
 
 // Key function returns key value.
-func (e SubscribePaymentAcceptedResponseValidationError) Key() bool { return e.key }
+func (e SubscribeInvoiceAcceptedResponseValidationError) Key() bool { return e.key }
 
 // ErrorName returns error name.
-func (e SubscribePaymentAcceptedResponseValidationError) ErrorName() string {
-	return "SubscribePaymentAcceptedResponseValidationError"
+func (e SubscribeInvoiceAcceptedResponseValidationError) ErrorName() string {
+	return "SubscribeInvoiceAcceptedResponseValidationError"
 }
 
 // Error satisfies the builtin error interface
-func (e SubscribePaymentAcceptedResponseValidationError) Error() string {
+func (e SubscribeInvoiceAcceptedResponseValidationError) Error() string {
 	cause := ""
 	if e.cause != nil {
 		cause = fmt.Sprintf(" | caused by: %v", e.cause)
@@ -659,14 +659,14 @@ func (e SubscribePaymentAcceptedResponseValidationError) Error() string {
 	}
 
 	return fmt.Sprintf(
-		"invalid %sSubscribePaymentAcceptedResponse.%s: %s%s",
+		"invalid %sSubscribeInvoiceAcceptedResponse.%s: %s%s",
 		key,
 		e.field,
 		e.reason,
 		cause)
 }
 
-var _ error = SubscribePaymentAcceptedResponseValidationError{}
+var _ error = SubscribeInvoiceAcceptedResponseValidationError{}
 
 var _ interface {
 	Field() string
@@ -674,7 +674,7 @@ var _ interface {
 	Key() bool
 	Cause() error
 	ErrorName() string
-} = SubscribePaymentAcceptedResponseValidationError{}
+} = SubscribeInvoiceAcceptedResponseValidationError{}
 
 // Validate checks the field values on SettleInvoiceRequest with the rules
 // defined in the proto definition for this message. If any rules are

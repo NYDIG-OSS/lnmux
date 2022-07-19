@@ -11,7 +11,7 @@ service Service {
 
     rpc SubscribeSingleInvoice (SubscribeSingleInvoiceRequest) returns (stream SubscribeSingleInvoiceResponse);
 
-    rpc SubscribePaymentAccepted (SubscribePaymentAcceptedRequest) returns (stream SubscribePaymentAcceptedResponse);
+    rpc SubscribeInvoiceAccepted (SubscribeInvoiceAcceptedRequest) returns (stream SubscribeInvoiceAcceptedResponse);
 
     rpc SettleInvoice (SettleInvoiceRequest) returns (SettleInvoiceResponse);
 
@@ -58,9 +58,9 @@ message SubscribeSingleInvoiceResponse {
     InvoiceState state = 1;
 }
 
-message SubscribePaymentAcceptedRequest {}
+message SubscribeInvoiceAcceptedRequest {}
 
-message SubscribePaymentAcceptedResponse {
+message SubscribeInvoiceAcceptedResponse {
     bytes hash = 1;
 }
 

@@ -165,8 +165,8 @@ func streamBuffered[T any](ctx context.Context,
 	}
 }
 
-func (s *server) SubscribePaymentAccepted(req *lnmuxrpc.SubscribePaymentAcceptedRequest,
-	subscription lnmuxrpc.Service_SubscribePaymentAcceptedServer) error {
+func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAcceptedRequest,
+	subscription lnmuxrpc.Service_SubscribeInvoiceAcceptedServer) error {
 
 	return streamBuffered(
 		subscription.Context(),
@@ -174,7 +174,7 @@ func (s *server) SubscribePaymentAccepted(req *lnmuxrpc.SubscribePaymentAccepted
 			return s.registry.SubscribeAccept(cb)
 		},
 		func(hash lntypes.Hash) error {
-			return subscription.Send(&lnmuxrpc.SubscribePaymentAcceptedResponse{
+			return subscription.Send(&lnmuxrpc.SubscribeInvoiceAcceptedResponse{
 				Hash: hash[:],
 			})
 		},

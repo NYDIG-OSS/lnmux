@@ -21,7 +21,7 @@ type ServiceClient interface {
 	GetInfo(ctx context.Context, in *GetInfoRequest, opts ...grpc.CallOption) (*GetInfoResponse, error)
 	AddInvoice(ctx context.Context, in *AddInvoiceRequest, opts ...grpc.CallOption) (*AddInvoiceResponse, error)
 	SubscribeSingleInvoice(ctx context.Context, in *SubscribeSingleInvoiceRequest, opts ...grpc.CallOption) (Service_SubscribeSingleInvoiceClient, error)
-	SubscribePaymentAccepted(ctx context.Context, in *SubscribePaymentAcceptedRequest, opts ...grpc.CallOption) (Service_SubscribePaymentAcceptedClient, error)
+	SubscribeInvoiceAccepted(ctx context.Context, in *SubscribeInvoiceAcceptedRequest, opts ...grpc.CallOption) (Service_SubscribeInvoiceAcceptedClient, error)
 	SettleInvoice(ctx context.Context, in *SettleInvoiceRequest, opts ...grpc.CallOption) (*SettleInvoiceResponse, error)
 	CancelInvoice(ctx context.Context, in *CancelInvoiceRequest, opts ...grpc.CallOption) (*CancelInvoiceResponse, error)
 }
@@ -84,12 +84,12 @@ func (x *serviceSubscribeSingleInvoiceClient) Recv() (*SubscribeSingleInvoiceRes
 	return m, nil
 }
 
-func (c *serviceClient) SubscribePaymentAccepted(ctx context.Context, in *SubscribePaymentAcceptedRequest, opts ...grpc.CallOption) (Service_SubscribePaymentAcceptedClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Service_ServiceDesc.Streams[1], "/lnmux.Service/SubscribePaymentAccepted", opts...)
+func (c *serviceClient) SubscribeInvoiceAccepted(ctx context.Context, in *SubscribeInvoiceAcceptedRequest, opts ...grpc.CallOption) (Service_SubscribeInvoiceAcceptedClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Service_ServiceDesc.Streams[1], "/lnmux.Service/SubscribeInvoiceAccepted", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &serviceSubscribePaymentAcceptedClient{stream}
+	x := &serviceSubscribeInvoiceAcceptedClient{stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -99,17 +99,17 @@ func (c *serviceClient) SubscribePaymentAccepted(ctx context.Context, in *Subscr
 	return x, nil
 }
 
-type Service_SubscribePaymentAcceptedClient interface {
-	Recv() (*SubscribePaymentAcceptedResponse, error)
+type Service_SubscribeInvoiceAcceptedClient interface {
+	Recv() (*SubscribeInvoiceAcceptedResponse, error)
 	grpc.ClientStream
 }
 
-type serviceSubscribePaymentAcceptedClient struct {
+type serviceSubscribeInvoiceAcceptedClient struct {
 	grpc.ClientStream
 }
 
-func (x *serviceSubscribePaymentAcceptedClient) Recv() (*SubscribePaymentAcceptedResponse, error) {
-	m := new(SubscribePaymentAcceptedResponse)
+func (x *serviceSubscribeInvoiceAcceptedClient) Recv() (*SubscribeInvoiceAcceptedResponse, error) {
+	m := new(SubscribeInvoiceAcceptedResponse)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ type ServiceServer interface {
 	GetInfo(context.Context, *GetInfoRequest) (*GetInfoResponse, error)
 	AddInvoice(context.Context, *AddInvoiceRequest) (*AddInvoiceResponse, error)
 	SubscribeSingleInvoice(*SubscribeSingleInvoiceRequest, Service_SubscribeSingleInvoiceServer) error
-	SubscribePaymentAccepted(*SubscribePaymentAcceptedRequest, Service_SubscribePaymentAcceptedServer) error
+	SubscribeInvoiceAccepted(*SubscribeInvoiceAcceptedRequest, Service_SubscribeInvoiceAcceptedServer) error
 	SettleInvoice(context.Context, *SettleInvoiceRequest) (*SettleInvoiceResponse, error)
 	CancelInvoice(context.Context, *CancelInvoiceRequest) (*CancelInvoiceResponse, error)
 	mustEmbedUnimplementedServiceServer()
@@ -160,8 +160,8 @@ func (UnimplementedServiceServer) AddInvoice(context.Context, *AddInvoiceRequest
 func (UnimplementedServiceServer) SubscribeSingleInvoice(*SubscribeSingleInvoiceRequest, Service_SubscribeSingleInvoiceServer) error {
 	return status.Errorf(codes.Unimplemented, "method SubscribeSingleInvoice not implemented")
 }
-func (UnimplementedServiceServer) SubscribePaymentAccepted(*SubscribePaymentAcceptedRequest, Service_SubscribePaymentAcceptedServer) error {
-	return status.Errorf(codes.Unimplemented, "method SubscribePaymentAccepted not implemented")
+func (UnimplementedServiceServer) SubscribeInvoiceAccepted(*SubscribeInvoiceAcceptedRequest, Service_SubscribeInvoiceAcceptedServer) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeInvoiceAccepted not implemented")
 }
 func (UnimplementedServiceServer) SettleInvoice(context.Context, *SettleInvoiceRequest) (*SettleInvoiceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SettleInvoice not implemented")
@@ -239,24 +239,24 @@ func (x *serviceSubscribeSingleInvoiceServer) Send(m *SubscribeSingleInvoiceResp
 	return x.ServerStream.SendMsg(m)
 }
 
-func _Service_SubscribePaymentAccepted_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(SubscribePaymentAcceptedRequest)
+func _Service_SubscribeInvoiceAccepted_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeInvoiceAcceptedRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(ServiceServer).SubscribePaymentAccepted(m, &serviceSubscribePaymentAcceptedServer{stream})
+	return srv.(ServiceServer).SubscribeInvoiceAccepted(m, &serviceSubscribeInvoiceAcceptedServer{stream})
 }
 
-type Service_SubscribePaymentAcceptedServer interface {
-	Send(*SubscribePaymentAcceptedResponse) error
+type Service_SubscribeInvoiceAcceptedServer interface {
+	Send(*SubscribeInvoiceAcceptedResponse) error
 	grpc.ServerStream
 }
 
-type serviceSubscribePaymentAcceptedServer struct {
+type serviceSubscribeInvoiceAcceptedServer struct {
 	grpc.ServerStream
 }
 
-func (x *serviceSubscribePaymentAcceptedServer) Send(m *SubscribePaymentAcceptedResponse) error {
+func (x *serviceSubscribeInvoiceAcceptedServer) Send(m *SubscribeInvoiceAcceptedResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -327,8 +327,8 @@ var Service_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 		{
-			StreamName:    "SubscribePaymentAccepted",
-			Handler:       _Service_SubscribePaymentAccepted_Handler,
+			StreamName:    "SubscribeInvoiceAccepted",
+			Handler:       _Service_SubscribeInvoiceAccepted_Handler,
 			ServerStreams: true,
 		},
 	},
