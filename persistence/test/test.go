@@ -28,13 +28,12 @@ func PGTestDSN() string {
 	return dsn
 }
 
-func ResetPGTestDB(t *testing.T, settings *TestDBSettings) (conn *pg.DB,
-	dsn string) {
+func ResetPGTestDB(t *testing.T, settings *TestDBSettings) (*pg.DB, string) {
 
 	if settings.DSN == "" {
 		settings.DSN = PGTestDSN()
 	}
-	dsn = settings.DSN
+	dsn := settings.DSN
 
 	if settings.Schema == "" {
 		settings.Schema = "lnmux"

@@ -30,11 +30,13 @@ type server struct {
 	lnmuxrpc.UnimplementedServiceServer
 }
 
-func newServer(creator *lnmux.InvoiceCreator, registry *lnmux.InvoiceRegistry) (*server, error) {
+func newServer(creator *lnmux.InvoiceCreator,
+	registry *lnmux.InvoiceRegistry) *server {
+
 	return &server{
 		registry: registry,
 		creator:  creator,
-	}, nil
+	}
 }
 
 func (s *server) GetInfo(ctx context.Context,

@@ -102,7 +102,7 @@ func (r *registryTestContext) close() {
 	r.pg.Close()
 }
 
-func (r *registryTestContext) createInvoice(id int, expiry time.Duration) (
+func (r *registryTestContext) createInvoice(id int, expiry time.Duration) ( // nolint:unparam
 	*Invoice, lntypes.Preimage) {
 
 	invoice, preimage, err := r.creator.Create(r.testAmt, expiry, "test", nil, 40)

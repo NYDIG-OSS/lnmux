@@ -32,9 +32,9 @@ func DiscoverSQLMigrations(dir string) error {
 // - reset - reverts all migrations.
 // - version - prints current db version.
 // - set_version - sets db version without running migrations.
-func Run(db migrations.DB, a ...string) (oldVersion, newVersion int64, err error) {
+func Run(db migrations.DB, a ...string) (int64, int64, error) {
 	if !sqlDiscovered {
-		err = DiscoverSQLMigrations("")
+		err := DiscoverSQLMigrations("")
 		if err != nil {
 			return 0, 0, err
 		}

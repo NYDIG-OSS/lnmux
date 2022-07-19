@@ -14,7 +14,7 @@ func Timeout() func() {
 	go func() {
 		select {
 		case <-time.After(testTimeout):
-			pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+			_ = pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
 
 			panic("test timeout")
 		case <-done:
