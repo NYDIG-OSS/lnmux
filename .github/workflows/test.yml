@@ -26,6 +26,6 @@ jobs:
       - name: Run tests
         # Runs a script that creates a PostgreSQL client,
         # populates the client with data, and retrieves data
-        run: go test ./...
+        run: go test -cover ./...
         env:
           LNMUX_TEST_DB_DSN: "postgres://bottle_test:bottle_test@postgres/bottle_test?sslmode=disable"
