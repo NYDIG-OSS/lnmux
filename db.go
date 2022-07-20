@@ -9,10 +9,6 @@ import (
 )
 
 var (
-	// ErrInvoiceAlreadySettled is returned when the invoice is already
-	// settled.
-	ErrInvoiceAlreadySettled = errors.New("invoice already settled")
-
 	// ErrInvoiceAlreadyCanceled is returned when the invoice is already
 	// canceled.
 	ErrInvoiceAlreadyCanceled = errors.New("invoice already canceled")

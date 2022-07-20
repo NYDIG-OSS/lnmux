@@ -111,16 +111,6 @@ func (r *registryTestContext) createInvoice(id int, expiry time.Duration) ( // n
 	return invoice, preimage
 }
 
-func (r *registryTestContext) subscribe(hash lntypes.Hash) (chan InvoiceUpdate, func()) {
-	updateChan := make(chan InvoiceUpdate, 1)
-	cancel, err := r.registry.Subscribe(hash, func(update InvoiceUpdate) {
-		updateChan <- update
-	})
-	require.NoError(r.t, err)
-
-	return updateChan, cancel
-}
-
 func (r *registryTestContext) subscribeAccept() (chan lntypes.Hash, func()) {
 	updateChan := make(chan lntypes.Hash)
 	cancel, err := r.registry.SubscribeAccept(func(hash lntypes.Hash) {
@@ -140,12 +130,6 @@ func (r *registryTestContext) checkHtlcFailed(resolution HtlcResolution,
 
 func (r *registryTestContext) checkHtlcSettled(resolution HtlcResolution) {
 	require.IsType(r.t, &HtlcSettleResolution{}, resolution)
-}
-
-func (r *registryTestContext) checkUpdate(update InvoiceUpdate,
-	expected persistence.InvoiceState) {
-
-	require.Equal(r.t, expected, update.State)
 }
 
 func TestInvoiceExpiry(t *testing.T) {
@@ -187,7 +171,6 @@ func TestAutoSettle(t *testing.T) {
 	invoice, preimage := c.createInvoice(1, time.Hour)
 
 	// Subscribe to updates for invoice.
-	updateChan, cancelUpdates := c.subscribe(preimage.Hash())
 	acceptChan, cancelAcceptUpdates := c.subscribeAccept()
 
 	resolved := make(chan struct{})
@@ -208,15 +191,8 @@ func TestAutoSettle(t *testing.T) {
 	acceptedInvoice := <-acceptChan
 	require.Equal(t, preimage.Hash(), acceptedInvoice)
 
-	c.checkUpdate(<-updateChan, persistence.InvoiceStateAccepted)
-
-	c.checkUpdate(<-updateChan, persistence.InvoiceStateSettleRequested)
-
-	c.checkUpdate(<-updateChan, persistence.InvoiceStateSettled)
-
 	<-resolved
 
-	cancelUpdates()
 	cancelAcceptUpdates()
 }
 
@@ -233,9 +209,6 @@ func TestSettle(t *testing.T) {
 	require.ErrorIs(t, c.registry.RequestSettle(hash), types.ErrInvoiceNotFound)
 	require.ErrorIs(t, c.registry.CancelInvoice(hash), types.ErrInvoiceNotFound)
 
-	// Subscribe to updates for invoice.
-	updateChan, cancelUpdates := c.subscribe(hash)
-
 	resolved := make(chan struct{})
 	c.registry.NotifyExitHopHtlc(&registryHtlc{
 		rHash:         hash,
@@ -251,22 +224,14 @@ func TestSettle(t *testing.T) {
 		},
 	})
 
-	c.checkUpdate(<-updateChan, persistence.InvoiceStateAccepted)
-
 	require.NoError(t, c.registry.RequestSettle(hash))
-
-	c.checkUpdate(<-updateChan, persistence.InvoiceStateSettleRequested)
-
-	c.checkUpdate(<-updateChan, persistence.InvoiceStateSettled)
 
 	<-resolved
 
 	// Test idempotency.
 	require.NoError(t, c.registry.RequestSettle(hash))
 
-	require.ErrorIs(t, c.registry.CancelInvoice(hash), ErrInvoiceAlreadySettled)
-
-	cancelUpdates()
+	require.ErrorIs(t, c.registry.CancelInvoice(hash), ErrSettleRequested)
 }
 
 func TestCancel(t *testing.T) {
@@ -278,9 +243,6 @@ func TestCancel(t *testing.T) {
 	invoice, preimage := c.createInvoice(1, time.Hour)
 	hash := preimage.Hash()
 
-	// Subscribe to updates for invoice.
-	updateChan, cancelUpdates := c.subscribe(hash)
-
 	resolved := make(chan struct{})
 	c.registry.NotifyExitHopHtlc(&registryHtlc{
 		rHash:         hash,
@@ -296,16 +258,11 @@ func TestCancel(t *testing.T) {
 		},
 	})
 
-	update := <-updateChan
-	require.Equal(t, persistence.InvoiceStateAccepted, update.State)
-
 	require.NoError(t, c.registry.CancelInvoice(hash))
 
 	<-resolved
 
 	require.ErrorIs(t, c.registry.CancelInvoice(hash), types.ErrInvoiceNotFound)
-
-	cancelUpdates()
 }
 
 func TestOverpayment(t *testing.T) {
@@ -318,7 +275,6 @@ func TestOverpayment(t *testing.T) {
 	rHash := preimage.Hash()
 
 	// Subscribe to updates for invoice.
-	updateChan, cancelUpdates := c.subscribe(preimage.Hash())
 	acceptChan, cancelAcceptUpdates := c.subscribeAccept()
 
 	resolved := make(chan HtlcResolution)
@@ -353,9 +309,6 @@ func TestOverpayment(t *testing.T) {
 	case <-acceptChan:
 		require.FailNow(t, "Invoice accepted incorrectly")
 
-	case <-updateChan:
-		require.FailNow(t, "Update generated incorrectly")
-
 	case <-resolved:
 		require.FailNow(t, "Resolution generated incorrectly")
 
@@ -380,9 +333,6 @@ func TestOverpayment(t *testing.T) {
 	case <-acceptChan:
 		require.FailNow(t, "Invoice accepted incorrectly")
 
-	case <-updateChan:
-		require.FailNow(t, "Update generated incorrectly")
-
 	case <-resolved:
 		require.FailNow(t, "Resolution generated incorrectly")
 
@@ -397,17 +347,10 @@ func TestOverpayment(t *testing.T) {
 	acceptedInvoice := <-acceptChan
 	require.Equal(t, preimage.Hash(), acceptedInvoice)
 
-	c.checkUpdate(<-updateChan, persistence.InvoiceStateAccepted)
-
-	c.checkUpdate(<-updateChan, persistence.InvoiceStateSettleRequested)
-
 	// Both of the HTLCs should now resolve as settled.
 	c.checkHtlcSettled(<-resolved)
 	c.checkHtlcSettled(<-resolved)
 
-	c.checkUpdate(<-updateChan, persistence.InvoiceStateSettled)
-
-	cancelUpdates()
 	cancelAcceptUpdates()
 }
 

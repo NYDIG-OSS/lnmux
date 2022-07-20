@@ -6,7 +6,6 @@ import (
 
 	"github.com/bottlepay/lnmux"
 	"github.com/bottlepay/lnmux/lnmuxrpc"
-	"github.com/bottlepay/lnmux/persistence"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"google.golang.org/grpc/codes"
@@ -65,55 +64,16 @@ func (s *server) GetInfo(ctx context.Context,
 	}, nil
 }
 
-func marshallInvoiceState(state persistence.InvoiceState) lnmuxrpc.SubscribeSingleInvoiceResponse_InvoiceState {
-	switch state {
-
-	case persistence.InvoiceStateAccepted:
-		return lnmuxrpc.SubscribeSingleInvoiceResponse_STATE_ACCEPTED
-
-	case persistence.InvoiceStateSettleRequested:
-		return lnmuxrpc.SubscribeSingleInvoiceResponse_STATE_SETTLE_REQUESTED
-
-	case persistence.InvoiceStateSettled:
-		return lnmuxrpc.SubscribeSingleInvoiceResponse_STATE_SETTLED
-
-	default:
-		panic("unknown invoice state")
-	}
-}
-
-func (s *server) SubscribeSingleInvoice(req *lnmuxrpc.SubscribeSingleInvoiceRequest,
-	subscription lnmuxrpc.Service_SubscribeSingleInvoiceServer) error {
-
-	hash, err := lntypes.MakeHash(req.Hash)
-	if err != nil {
-		return err
-	}
-
-	return streamBuffered(
-		subscription.Context(),
-		func(cb func(lnmux.InvoiceUpdate)) (func(), error) {
-			return s.registry.Subscribe(hash, cb)
-		},
-		func(update lnmux.InvoiceUpdate) error {
-			return subscription.Send(&lnmuxrpc.SubscribeSingleInvoiceResponse{
-				State: marshallInvoiceState(update.State),
-			})
-		},
-	)
-}
-
-func streamBuffered[T any](ctx context.Context,
-	subscribe func(func(T)) (func(), error),
-	send func(T) error) error {
+func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAcceptedRequest,
+	subscription lnmuxrpc.Service_SubscribeInvoiceAcceptedServer) error {
 
 	var (
-		bufferChan = make(chan T, subscriberQueueSize)
+		bufferChan = make(chan lntypes.Hash, subscriberQueueSize)
 		closed     = false
 	)
 
-	cancel, err := subscribe(
-		func(item T) {
+	cancel, err := s.registry.SubscribeAccept(
+		func(hash lntypes.Hash) {
 			// Don't try to write if the channel is closed. This callback does
 			// not need to be thread-safe.
 			if closed {
@@ -121,12 +81,12 @@ func streamBuffered[T any](ctx context.Context,
 			}
 
 			select {
-			case bufferChan <- item:
+			case bufferChan <- hash:
 
 			// When the context is cancelled, close the update channel. We don't
 			// want to skip this update and on the next one send into the
 			// channel again.
-			case <-ctx.Done():
+			case <-subscription.Context().Done():
 				close(bufferChan)
 				closed = true
 
@@ -146,7 +106,7 @@ func streamBuffered[T any](ctx context.Context,
 	for {
 		select {
 
-		case <-ctx.Done():
+		case <-subscription.Context().Done():
 			return nil
 
 		case item, ok := <-bufferChan:
@@ -157,28 +117,14 @@ func streamBuffered[T any](ctx context.Context,
 				)
 			}
 
-			err := send(item)
+			err := subscription.Send(&lnmuxrpc.SubscribeInvoiceAcceptedResponse{
+				Hash: item[:],
+			})
 			if err != nil {
 				return err
 			}
 		}
 	}
-}
-
-func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAcceptedRequest,
-	subscription lnmuxrpc.Service_SubscribeInvoiceAcceptedServer) error {
-
-	return streamBuffered(
-		subscription.Context(),
-		func(cb func(lntypes.Hash)) (func(), error) {
-			return s.registry.SubscribeAccept(cb)
-		},
-		func(hash lntypes.Hash) error {
-			return subscription.Send(&lnmuxrpc.SubscribeInvoiceAcceptedResponse{
-				Hash: hash[:],
-			})
-		},
-	)
 }
 
 func (s *server) AddInvoice(ctx context.Context,
@@ -268,9 +214,6 @@ func (s *server) CancelInvoice(ctx context.Context,
 	switch {
 	case err == types.ErrInvoiceNotFound:
 		return nil, status.Error(codes.NotFound, err.Error())
-
-	case err == lnmux.ErrInvoiceAlreadySettled:
-		return nil, status.Error(codes.FailedPrecondition, err.Error())
 
 	case err == lnmux.ErrSettleRequested:
 		return nil, status.Error(codes.FailedPrecondition, err.Error())

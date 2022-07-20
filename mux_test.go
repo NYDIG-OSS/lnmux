@@ -143,20 +143,6 @@ func TestMux(t *testing.T) {
 		errChan <- mux.Run(ctx)
 	}()
 
-	var updateChan = make(chan InvoiceUpdate, 1)
-	cancelSubscription, err := registry.Subscribe(testHash, func(update InvoiceUpdate) {
-		logger.Sugar().Infow("Payment received", "state", update.State)
-
-		updateChan <- update
-	})
-	require.NoError(t, err)
-	expectUpdate := func(state persistence.InvoiceState) {
-		t.Helper()
-
-		update := <-updateChan
-		require.Equal(t, state, update.State)
-	}
-
 	var acceptChan = make(chan lntypes.Hash, 1)
 	cancelAcceptSubscription, err := registry.SubscribeAccept(func(hash lntypes.Hash) {
 		logger.Sugar().Infow("Payment accepted", "hash", hash)
@@ -242,15 +228,10 @@ func TestMux(t *testing.T) {
 	htlcChan2 <- receiveHtlc(2, 4000)
 
 	expectAccept(testHash)
-	expectUpdate(persistence.InvoiceStateAccepted)
 	require.NoError(t, registry.RequestSettle(testHash))
-
-	expectUpdate(persistence.InvoiceStateSettleRequested)
 
 	expectResponse(<-responseChan1, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
 	expectResponse(<-responseChan2, 2, routerrpc.ResolveHoldForwardAction_SETTLE)
-
-	expectUpdate(persistence.InvoiceStateSettled)
 
 	_, htlcs, err := db.Get(context.Background(), testHash)
 	require.NoError(t, err)
@@ -264,8 +245,6 @@ func TestMux(t *testing.T) {
 	htlcChan1 <- receiveHtlc(10, 10000)
 	expectResponse(<-responseChan1, 10, routerrpc.ResolveHoldForwardAction_FAIL)
 
-	cancelSubscription()
-
 	// Create a new invoice.
 	invoice, testPreimage, err = creator.Create(
 		15000, time.Minute, "test 2", nil, 40,
@@ -275,29 +254,16 @@ func TestMux(t *testing.T) {
 
 	testHash = testPreimage.Hash()
 
-	cancelSubscription, err = registry.Subscribe(testHash, func(update InvoiceUpdate) {
-		logger.Sugar().Infow("Payment received", "state", update.State)
-
-		updateChan <- update
-	})
-	require.NoError(t, err)
-
 	// Regenerate onion blob for new hash.
 	onionBlob = genOnion()
 
 	htlcChan1 <- receiveHtlc(20, 15000)
 
 	expectAccept(testHash)
-	expectUpdate(persistence.InvoiceStateAccepted)
 	require.NoError(t, registry.RequestSettle(testHash))
-
-	expectUpdate(persistence.InvoiceStateSettleRequested)
 
 	expectResponse(<-responseChan1, 20, routerrpc.ResolveHoldForwardAction_SETTLE)
 
-	expectUpdate(persistence.InvoiceStateSettled)
-
-	cancelSubscription()
 	cancelAcceptSubscription()
 
 	cancel()
