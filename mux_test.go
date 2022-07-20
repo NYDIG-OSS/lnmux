@@ -143,7 +143,7 @@ func TestMux(t *testing.T) {
 		errChan <- mux.Run(ctx)
 	}()
 
-	var updateChan = make(chan InvoiceUpdate, 1)
+	var updateChan = make(chan InvoiceUpdate, 2)
 	cancelSubscription, err := registry.Subscribe(testHash, func(update InvoiceUpdate) {
 		logger.Sugar().Infow("Payment received", "state", update.State)
 

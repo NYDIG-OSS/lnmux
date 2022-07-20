@@ -112,7 +112,7 @@ func (r *registryTestContext) createInvoice(id int, expiry time.Duration) ( // n
 }
 
 func (r *registryTestContext) subscribe(hash lntypes.Hash) (chan InvoiceUpdate, func()) {
-	updateChan := make(chan InvoiceUpdate, 1)
+	updateChan := make(chan InvoiceUpdate, 2)
 	cancel, err := r.registry.Subscribe(hash, func(update InvoiceUpdate) {
 		updateChan <- update
 	})

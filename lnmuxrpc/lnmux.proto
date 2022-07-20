@@ -13,8 +13,13 @@ service Service {
 
     rpc SubscribeInvoiceAccepted (SubscribeInvoiceAcceptedRequest) returns (stream SubscribeInvoiceAcceptedResponse);
 
+    // Requests settlement for an accepted invoice. This call is idempotent.
     rpc SettleInvoice (SettleInvoiceRequest) returns (SettleInvoiceResponse);
 
+    // Cancels an accepted invoice. If the htlc set is no longer complete, the
+    // remaining htlcs are cancelled. If the htlc set is no longer existing, a
+    // success result is still returned. Only in case settle has been requested
+    // for an invoice, CancelInvoice returns a FailedPrecondition error.
     rpc CancelInvoice (CancelInvoiceRequest) returns (CancelInvoiceResponse);
 }
 

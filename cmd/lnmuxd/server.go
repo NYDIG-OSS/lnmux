@@ -266,9 +266,6 @@ func (s *server) CancelInvoice(ctx context.Context,
 
 	err = s.registry.CancelInvoice(hash)
 	switch {
-	case err == types.ErrInvoiceNotFound:
-		return nil, status.Error(codes.NotFound, err.Error())
-
 	case err == lnmux.ErrInvoiceAlreadySettled:
 		return nil, status.Error(codes.FailedPrecondition, err.Error())
 

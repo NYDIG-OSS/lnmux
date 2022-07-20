@@ -22,7 +22,12 @@ type ServiceClient interface {
 	AddInvoice(ctx context.Context, in *AddInvoiceRequest, opts ...grpc.CallOption) (*AddInvoiceResponse, error)
 	SubscribeSingleInvoice(ctx context.Context, in *SubscribeSingleInvoiceRequest, opts ...grpc.CallOption) (Service_SubscribeSingleInvoiceClient, error)
 	SubscribeInvoiceAccepted(ctx context.Context, in *SubscribeInvoiceAcceptedRequest, opts ...grpc.CallOption) (Service_SubscribeInvoiceAcceptedClient, error)
+	// Requests settlement for an accepted invoice. This call is idempotent.
 	SettleInvoice(ctx context.Context, in *SettleInvoiceRequest, opts ...grpc.CallOption) (*SettleInvoiceResponse, error)
+	// Cancels an accepted invoice. If the htlc set is no longer complete, the
+	// remaining htlcs are cancelled. If the htlc set is no longer existing, a
+	// success result is still returned. Only in case settle has been requested
+	// for an invoice, CancelInvoice returns a FailedPrecondition error.
 	CancelInvoice(ctx context.Context, in *CancelInvoiceRequest, opts ...grpc.CallOption) (*CancelInvoiceResponse, error)
 }
 
@@ -142,7 +147,12 @@ type ServiceServer interface {
 	AddInvoice(context.Context, *AddInvoiceRequest) (*AddInvoiceResponse, error)
 	SubscribeSingleInvoice(*SubscribeSingleInvoiceRequest, Service_SubscribeSingleInvoiceServer) error
 	SubscribeInvoiceAccepted(*SubscribeInvoiceAcceptedRequest, Service_SubscribeInvoiceAcceptedServer) error
+	// Requests settlement for an accepted invoice. This call is idempotent.
 	SettleInvoice(context.Context, *SettleInvoiceRequest) (*SettleInvoiceResponse, error)
+	// Cancels an accepted invoice. If the htlc set is no longer complete, the
+	// remaining htlcs are cancelled. If the htlc set is no longer existing, a
+	// success result is still returned. Only in case settle has been requested
+	// for an invoice, CancelInvoice returns a FailedPrecondition error.
 	CancelInvoice(context.Context, *CancelInvoiceRequest) (*CancelInvoiceResponse, error)
 	mustEmbedUnimplementedServiceServer()
 }
