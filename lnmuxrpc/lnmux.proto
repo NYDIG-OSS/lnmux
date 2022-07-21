@@ -11,8 +11,11 @@ service Service {
 
     rpc SubscribeInvoiceAccepted (SubscribeInvoiceAcceptedRequest) returns (stream SubscribeInvoiceAcceptedResponse);
 
+    // Requests settlement for an accepted invoice. This call is idempotent.
     rpc SettleInvoice (SettleInvoiceRequest) returns (SettleInvoiceResponse);
 
+    // Cancels an accepted invoice. In case settle has been requested
+    // for an invoice, CancelInvoice returns a FailedPrecondition error.
     rpc CancelInvoice (CancelInvoiceRequest) returns (CancelInvoiceResponse);
 }
 
@@ -46,16 +49,19 @@ message SubscribeInvoiceAcceptedRequest {}
 
 message SubscribeInvoiceAcceptedResponse {
     bytes hash = 1;
+    bytes set_id = 2;
 }
 
 message SettleInvoiceRequest {
     bytes hash = 1;
+    bytes set_id = 2;
 }
 
 message SettleInvoiceResponse {}
 
 message CancelInvoiceRequest {
     bytes hash = 1;
+    bytes set_id = 2;
 }
 
 message CancelInvoiceResponse {}

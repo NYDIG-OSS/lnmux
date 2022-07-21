@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/bottlepay/lnmux"
@@ -64,16 +65,21 @@ func (s *server) GetInfo(ctx context.Context,
 	}, nil
 }
 
+type acceptedEvent struct {
+	hash  lntypes.Hash
+	setID [32]byte
+}
+
 func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAcceptedRequest,
 	subscription lnmuxrpc.Service_SubscribeInvoiceAcceptedServer) error {
 
 	var (
-		bufferChan = make(chan lntypes.Hash, subscriberQueueSize)
+		bufferChan = make(chan acceptedEvent, subscriberQueueSize)
 		closed     = false
 	)
 
 	cancel, err := s.registry.SubscribeAccept(
-		func(hash lntypes.Hash) {
+		func(hash lntypes.Hash, setID lnmux.SetID) {
 			// Don't try to write if the channel is closed. This callback does
 			// not need to be thread-safe.
 			if closed {
@@ -81,7 +87,10 @@ func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAccepted
 			}
 
 			select {
-			case bufferChan <- hash:
+			case bufferChan <- acceptedEvent{
+				hash:  hash,
+				setID: setID,
+			}:
 
 			// When the context is cancelled, close the update channel. We don't
 			// want to skip this update and on the next one send into the
@@ -118,7 +127,8 @@ func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAccepted
 			}
 
 			err := subscription.Send(&lnmuxrpc.SubscribeInvoiceAcceptedResponse{
-				Hash: item[:],
+				Hash:  item.hash[:],
+				SetId: item.setID[:],
 			})
 			if err != nil {
 				return err
@@ -173,6 +183,17 @@ func (s *server) AddInvoice(ctx context.Context,
 	}, nil
 }
 
+func parseSetID(setIDBytes []byte) ([32]byte, error) {
+	if len(setIDBytes) != 32 {
+		return [32]byte{}, errors.New("invalid set id")
+	}
+
+	var setID [32]byte
+	copy(setID[:], setIDBytes)
+
+	return setID, nil
+}
+
 func (s *server) SettleInvoice(ctx context.Context,
 	req *lnmuxrpc.SettleInvoiceRequest) (*lnmuxrpc.SettleInvoiceResponse,
 	error) {
@@ -182,7 +203,12 @@ func (s *server) SettleInvoice(ctx context.Context,
 		return nil, err
 	}
 
-	err = s.registry.RequestSettle(hash)
+	setID, err := parseSetID(req.SetId)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.registry.RequestSettle(hash, setID)
 	switch {
 	case err == types.ErrInvoiceNotFound:
 		return nil, status.Error(
@@ -210,10 +236,17 @@ func (s *server) CancelInvoice(ctx context.Context,
 		return nil, err
 	}
 
-	err = s.registry.CancelInvoice(hash)
+	setID, err := parseSetID(req.SetId)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.registry.CancelInvoice(hash, setID)
 	switch {
 	case err == types.ErrInvoiceNotFound:
-		return nil, status.Error(codes.NotFound, err.Error())
+		return nil, status.Error(
+			codes.NotFound, types.ErrInvoiceNotFound.Error(),
+		)
 
 	case err == lnmux.ErrSettleRequested:
 		return nil, status.Error(codes.FailedPrecondition, err.Error())

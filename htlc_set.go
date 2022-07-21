@@ -11,7 +11,7 @@ type htlcSet interface {
 	getHtlcMap() map[types.CircuitKey]int64
 	accepted(key types.CircuitKey) bool
 	totalSetAmt() int64
-	isComplete() bool
+	isComplete() *SetID
 
 	deleteAll(cb func(types.CircuitKey))
 	deleteHtlc(key types.CircuitKey)
@@ -56,8 +56,19 @@ func (h *htlcSetImpl) totalSetAmt() int64 {
 	return total
 }
 
-func (h *htlcSetImpl) isComplete() bool {
-	return h.totalSetAmt() == h.params.value
+func (h *htlcSetImpl) isComplete() *SetID {
+	if h.totalSetAmt() != h.params.value {
+		return nil
+	}
+
+	var keys []types.CircuitKey
+	for htlc := range h.htlcs {
+		keys = append(keys, htlc)
+	}
+
+	hash := newSetID(keys)
+
+	return &hash
 }
 
 func (h *htlcSetImpl) hash() lntypes.Hash {

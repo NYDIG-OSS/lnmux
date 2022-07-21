@@ -111,10 +111,17 @@ func (r *registryTestContext) createInvoice(id int, expiry time.Duration) ( // n
 	return invoice, preimage
 }
 
-func (r *registryTestContext) subscribeAccept() (chan lntypes.Hash, func()) {
-	updateChan := make(chan lntypes.Hash)
-	cancel, err := r.registry.SubscribeAccept(func(hash lntypes.Hash) {
-		updateChan <- hash
+type acceptEvent struct {
+	hash  lntypes.Hash
+	setID SetID
+}
+
+func (r *registryTestContext) subscribeAccept() (chan acceptEvent, func()) {
+	updateChan := make(chan acceptEvent)
+	cancel, err := r.registry.SubscribeAccept(func(hash lntypes.Hash,
+		setID SetID) {
+
+		updateChan <- acceptEvent{hash: hash, setID: setID}
 	})
 	require.NoError(r.t, err)
 
@@ -189,7 +196,7 @@ func TestAutoSettle(t *testing.T) {
 	})
 
 	acceptedInvoice := <-acceptChan
-	require.Equal(t, preimage.Hash(), acceptedInvoice)
+	require.Equal(t, preimage.Hash(), acceptedInvoice.hash)
 
 	<-resolved
 
@@ -201,13 +208,16 @@ func TestSettle(t *testing.T) {
 
 	c := newRegistryTestContext(t, false)
 
+	acceptChan, acceptCancel := c.subscribeAccept()
+	defer acceptCancel()
+
 	// Add invoice.
 	invoice, preimage := c.createInvoice(1, time.Hour)
 	hash := preimage.Hash()
 
 	// Test cancel/settle on invoices that are not yet accepted.
-	require.ErrorIs(t, c.registry.RequestSettle(hash), types.ErrInvoiceNotFound)
-	require.ErrorIs(t, c.registry.CancelInvoice(hash), types.ErrInvoiceNotFound)
+	require.ErrorIs(t, c.registry.RequestSettle(hash, SetID{}), types.ErrInvoiceNotFound)
+	require.ErrorIs(t, c.registry.CancelInvoice(hash, SetID{}), types.ErrInvoiceNotFound)
 
 	resolved := make(chan struct{})
 	c.registry.NotifyExitHopHtlc(&registryHtlc{
@@ -224,14 +234,25 @@ func TestSettle(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, c.registry.RequestSettle(hash))
+	accept := <-acceptChan
+	require.Equal(t, hash, accept.hash)
+
+	// Settling with a different set id should fail.
+	require.ErrorIs(t, c.registry.RequestSettle(accept.hash, SetID{}), types.ErrInvoiceNotFound)
+	require.ErrorIs(t, c.registry.CancelInvoice(hash, SetID{}), types.ErrInvoiceNotFound)
+
+	require.NoError(t, c.registry.RequestSettle(accept.hash, accept.setID))
+
+	// After settling, re-settling with a different set id should still fail.
+	require.ErrorIs(t, c.registry.RequestSettle(accept.hash, SetID{}), types.ErrInvoiceNotFound)
 
 	<-resolved
 
 	// Test idempotency.
-	require.NoError(t, c.registry.RequestSettle(hash))
+	require.NoError(t, c.registry.RequestSettle(accept.hash, accept.setID))
 
-	require.ErrorIs(t, c.registry.CancelInvoice(hash), ErrSettleRequested)
+	require.ErrorIs(t, c.registry.CancelInvoice(accept.hash, accept.setID), ErrSettleRequested)
+	require.ErrorIs(t, c.registry.CancelInvoice(accept.hash, SetID{}), types.ErrInvoiceNotFound)
 }
 
 func TestCancel(t *testing.T) {
@@ -239,6 +260,9 @@ func TestCancel(t *testing.T) {
 
 	c := newRegistryTestContext(t, false)
 
+	acceptChan, acceptCancel := c.subscribeAccept()
+	defer acceptCancel()
+
 	// Add invoice.
 	invoice, preimage := c.createInvoice(1, time.Hour)
 	hash := preimage.Hash()
@@ -258,11 +282,13 @@ func TestCancel(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, c.registry.CancelInvoice(hash))
+	accept := <-acceptChan
+
+	require.NoError(t, c.registry.CancelInvoice(accept.hash, accept.setID))
 
 	<-resolved
 
-	require.ErrorIs(t, c.registry.CancelInvoice(hash), types.ErrInvoiceNotFound)
+	require.ErrorIs(t, c.registry.CancelInvoice(accept.hash, accept.setID), types.ErrInvoiceNotFound)
 }
 
 func TestOverpayment(t *testing.T) {
@@ -345,7 +371,7 @@ func TestOverpayment(t *testing.T) {
 	notifyHtlc(4, rest)
 
 	acceptedInvoice := <-acceptChan
-	require.Equal(t, preimage.Hash(), acceptedInvoice)
+	require.Equal(t, preimage.Hash(), acceptedInvoice.hash)
 
 	// Both of the HTLCs should now resolve as settled.
 	c.checkHtlcSettled(<-resolved)

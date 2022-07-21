@@ -476,6 +476,8 @@ func (m *SubscribeInvoiceAcceptedResponse) Validate() error {
 
 	// no validation rules for Hash
 
+	// no validation rules for SetId
+
 	return nil
 }
 
@@ -545,6 +547,8 @@ func (m *SettleInvoiceRequest) Validate() error {
 	}
 
 	// no validation rules for Hash
+
+	// no validation rules for SetId
 
 	return nil
 }
@@ -681,6 +685,8 @@ func (m *CancelInvoiceRequest) Validate() error {
 	}
 
 	// no validation rules for Hash
+
+	// no validation rules for SetId
 
 	return nil
 }

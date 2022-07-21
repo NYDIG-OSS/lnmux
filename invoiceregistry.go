@@ -76,10 +76,11 @@ type RegistryConfig struct {
 }
 
 type InvoiceCallback func(update InvoiceUpdate)
-type AcceptCallback func(lntypes.Hash)
+type AcceptCallback func(lntypes.Hash, SetID)
 
 type invoiceRequest struct {
 	hash    lntypes.Hash
+	setID   SetID
 	errChan chan error
 }
 
@@ -193,11 +194,14 @@ func (i *InvoiceRegistry) SubscribeAccept(callback AcceptCallback) (
 	}, nil
 }
 
-func (i *InvoiceRegistry) RequestSettle(hash lntypes.Hash) error {
-	i.logger.Debugw("New settle request received", "hash", hash)
+func (i *InvoiceRegistry) RequestSettle(hash lntypes.Hash,
+	setID SetID) error {
+
+	i.logger.Debugw("New settle request received", "hash", hash, "setID", setID)
 
 	request := &invoiceRequest{
 		hash:    hash,
+		setID:   setID,
 		errChan: make(chan error),
 	}
 
@@ -218,12 +222,13 @@ func (i *InvoiceRegistry) RequestSettle(hash lntypes.Hash) error {
 }
 
 func (i *InvoiceRegistry) CancelInvoice(
-	hash lntypes.Hash) error {
+	hash lntypes.Hash, setID SetID) error {
 
 	i.logger.Debugw("New cancel request received", "hash", hash)
 
 	request := &invoiceRequest{
 		hash:    hash,
+		setID:   setID,
 		errChan: make(chan error),
 	}
 
@@ -304,112 +309,22 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			i.subscriptionManager.deleteAcceptSubscription(id)
 
 		case req := <-i.requestSettleChan:
-			sendResponse := func(err error) error {
-				return i.sendResponse(req.errChan, err)
-			}
-
-			// Retrieve invoice.
-			set, ok := i.sets.get(req.hash)
-			if !ok {
-				// The invoice is not in the accepted state. Check the database
-				// to see if it was already settled or requested to be settled.
-				var requestErr error
-
-				_, _, err := i.cdb.Get(ctx, req.hash)
-				switch {
-				// Invoice already settled or requested to be settled. This
-				// operation is implemented idempotently, so return success.
-				case err == nil:
-					requestErr = nil
-
-				case err == types.ErrInvoiceNotFound:
-					requestErr = types.ErrInvoiceNotFound
-
-				case err != nil:
-					return err
-				}
-
-				err = sendResponse(requestErr)
-				if err != nil {
-					return err
-				}
-
-				break
-			}
-
-			// Don't allow external settles on auto-settling invoices.
-			if i.cfg.AutoSettle {
-				err := sendResponse(ErrAutoSettling)
-				if err != nil {
-					return err
-				}
-
-				break
-			}
-
-			// Store settle request in database.
-			err := i.markSettleRequested(ctx, set)
-
-			// In both error and success cases, notify request thread of
-			// outcome.
-			if sendErr := sendResponse(err); sendErr != nil {
-				return sendErr
-			}
-
-			if err != nil {
-				i.logger.Debugw("Settle request error", "err", err)
-
-				break
-			}
-
-			// Send settle signal to lnd node(s).
-			err = i.requestSettle(set)
+			requestErr, err := i.handleSettleRequest(ctx, req.hash, req.setID)
 			if err != nil {
 				return err
 			}
 
-		case req := <-i.cancelChan:
-			// Retrieve invoice.
-			set, ok := i.sets.get(req.hash)
-			if !ok {
-				// The invoice is not in the accepted state. Check the database
-				// to see if it was already settled or requested to be settled.
-				var requestErr error
-
-				_, _, err := i.cdb.Get(ctx, req.hash)
-				switch {
-				case err == nil:
-					requestErr = ErrSettleRequested
-
-				case err == types.ErrInvoiceNotFound:
-					requestErr = types.ErrInvoiceNotFound
-
-				case err != nil:
-					return err
-				}
-
-				err = i.sendResponse(req.errChan, requestErr)
-				if err != nil {
-					return err
-				}
-
-				break
+			if err := i.sendResponse(req.errChan, requestErr); err != nil {
+				return err
 			}
 
-			// Delete in-memory record for this invoice. Only open invoices are
-			// kept in memory.
-			set.deleteAll(func(key types.CircuitKey) {
-				// Notify subscribers that the htlcs should be settled
-				// with our peer.
-				resolution := NewFailResolution(
-					ResultInvoiceNotOpen,
-				)
-				i.notifyHodlSubscribers(key, resolution)
-			})
-
-			// Send success response.
-			err := i.sendResponse(req.errChan, nil)
+		case req := <-i.cancelChan:
+			requestErr, err := i.handleCancelRequest(ctx, req.hash, req.setID)
 			if err != nil {
+				return err
+			}
+
+			if err := i.sendResponse(req.errChan, requestErr); err != nil {
 				return err
 			}
 
@@ -420,6 +335,119 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+func (i *InvoiceRegistry) handleCancelRequest(ctx context.Context,
+	hash lntypes.Hash, setID SetID) (error, error) {
+
+	set, requestErr, err := i.getAcceptedSet(ctx, hash, setID)
+	if err != nil {
+		return nil, err
+	}
+	if requestErr != nil {
+		return requestErr, nil
+	}
+
+	// Delete in-memory record for this invoice. Only open invoices are
+	// kept in memory.
+	set.deleteAll(func(key types.CircuitKey) {
+		// Notify subscribers that the htlcs should be settled
+		// with our peer.
+		resolution := NewFailResolution(
+			ResultInvoiceNotOpen,
+		)
+		i.notifyHodlSubscribers(key, resolution)
+	})
+
+	return nil, nil
+}
+
+func (i *InvoiceRegistry) handleSettleRequest(ctx context.Context,
+	hash lntypes.Hash, setID [32]byte) (error, error) {
+
+	set, requestErr, err := i.getAcceptedSet(ctx, hash, setID)
+	if err != nil {
+		return nil, err
+	}
+
+	switch {
+	// Invoice already requested to be settled. This operation is implemented
+	// idempotently, so return success.
+	case requestErr == ErrSettleRequested:
+		return nil, nil
+
+	case requestErr != nil:
+		return requestErr, nil
+	}
+
+	// Don't allow external settles on auto-settling invoices.
+	if i.cfg.AutoSettle {
+		return ErrAutoSettling, nil
+	}
+
+	// Store settle request in database.
+	err = i.markSettleRequested(ctx, set)
+	if err != nil {
+		i.logger.Debugw("Settle request error", "err", err)
+
+		return nil, err
+	}
+
+	err = i.requestSettle(set)
+	if err != nil {
+		return nil, err
+	}
+
+	return nil, nil
+}
+
+func (i *InvoiceRegistry) getAcceptedSet(ctx context.Context, hash lntypes.Hash,
+	setID SetID) (htlcSet, error, error) {
+
+	// Retrieve invoice.
+	set, ok := i.sets.get(hash)
+	if !ok {
+		// The invoice is not in the accepted state. Check the database
+		// to see if it was already settled or requested to be settled.
+		_, htlcs, err := i.cdb.Get(ctx, hash)
+		switch {
+		case err == types.ErrInvoiceNotFound:
+			return nil, types.ErrInvoiceNotFound, nil
+
+		case err != nil:
+			return nil, nil, err
+		}
+
+		// Invoice is in the database. Check if the set id matches.
+		var keys []types.CircuitKey
+		for key := range htlcs {
+			keys = append(keys, key)
+		}
+		dbSetID := newSetID(keys)
+		if setID != dbSetID {
+			return nil, types.ErrInvoiceNotFound, nil
+		}
+
+		return nil, ErrSettleRequested, nil
+	}
+
+	// Check whether the set is still complete.
+	setHash := set.isComplete()
+	if setHash == nil {
+		i.logger.Infow("Set incomplete",
+			"setTotal", set.totalSetAmt(),
+			"invoiceValue", set.value())
+
+		return nil, types.ErrInvoiceNotFound, nil
+	}
+	if *setHash != setID {
+		i.logger.Infow("Set mismatch",
+			"expectedSet", *setHash, "actualSet", setID)
+
+		return nil, types.ErrInvoiceNotFound, nil
+	}
+
+	return set, nil, nil
 }
 
 // sendResponse sends a result on a response channel.
@@ -444,11 +472,12 @@ func (i *InvoiceRegistry) addAcceptSubscriber(
 	// Send accepted invoices from memory.
 	i.sets.forEach(func(set htlcSet) {
 		// No event for partially accepted invoices.
-		if !set.isComplete() {
+		setID := set.isComplete()
+		if setID == nil {
 			return
 		}
 
-		newSubscription.callback(set.hash())
+		newSubscription.callback(set.hash(), *setID)
 	})
 
 	return nil
@@ -527,7 +556,7 @@ func (i *InvoiceRegistry) cancelSingleHtlc(hash lntypes.Hash,
 	}
 
 	// Do nothing if the set is already complete.
-	if set.isComplete() {
+	if set.isComplete() != nil {
 		return
 	}
 
@@ -742,7 +771,8 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		h.rHash, h.amtPaid, h.expiry, h.circuitKey, mpp)
 
 	// If the invoice cannot be settled yet, only record the htlc.
-	if !set.isComplete() {
+	setID := set.isComplete()
+	if setID == nil {
 		// Start a release timer for this htlc. We release either after the hold
 		// duration has passed or the invoice expires - whichever comes first.
 		releaseTime := time.Now().Add(i.cfg.HtlcHoldDuration)
@@ -755,18 +785,19 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		return nil
 	}
 
+	i.logger.Debugw("Set complete", "setID", *setID)
+
 	// The set is complete and we start the accept timer.
 	i.startAcceptTimer(h.rHash)
 
 	// Notify subscriber of accepted invoice.
-	i.subscriptionManager.notifySubscribers(h.rHash)
+	i.subscriptionManager.notifySubscribers(h.rHash, *setID)
 
 	// Auto-settle invoice if specified.
 	if i.cfg.AutoSettle {
 		i.logger.Debugw("Auto-settling", "hash", h.rHash)
 
-		// The set is complete and we go straight to markSettleRequested. This
-		// means that this call cannot fail because htlcs timed out.
+		// The set is complete and we go straight to markSettleRequested.
 		if err := i.markSettleRequested(ctx, set); err != nil {
 			return err
 		}
@@ -805,16 +836,6 @@ func (i *InvoiceRegistry) markSettleRequested(ctx context.Context,
 	set htlcSet) error {
 
 	hash := set.hash()
-
-	// Check whether the set is still complete.
-	setTotal := set.totalSetAmt()
-	if setTotal != set.value() {
-		i.logger.Infow("Set no longer complete",
-			"setTotal", setTotal,
-			"invoiceValue", set.value())
-
-		return errors.New("set no longer complete")
-	}
 
 	i.logger.Infow("Stateless invoice JIT insertion",
 		"hash", hash)
