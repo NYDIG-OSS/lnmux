@@ -18,6 +18,7 @@ import (
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwire"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 type Mux struct {
@@ -69,26 +70,18 @@ func New(cfg *MuxConfig) (*Mux,
 }
 
 func (p *Mux) Run(ctx context.Context) error {
-	registryErrChan := make(chan error)
-	go func() {
-		registryErrChan <- p.registry.Run(ctx)
-	}()
+	group, ctx := errgroup.WithContext(ctx)
+
+	group.Go(func() error {
+		return p.registry.Run(ctx)
+	})
 
 	// Start multiplexer main loop.
-	err := p.run(ctx)
-	if err != nil {
-		return err
-	}
+	group.Go(func() error {
+		return p.run(ctx)
+	})
 
-	// Await registry termination.
-	err = <-registryErrChan
-	if err != nil {
-		return err
-	}
-
-	p.logger.Infof("Multiplexer stopped")
-
-	return nil
+	return group.Wait()
 }
 
 type interceptedHtlc struct {
