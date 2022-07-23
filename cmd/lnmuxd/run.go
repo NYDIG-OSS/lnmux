@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +20,7 @@ import (
 	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -105,28 +106,7 @@ func runAction(c *cli.Context) error {
 		return err
 	}
 
-	var (
-		wg             sync.WaitGroup
-		processErrChan = make(chan error)
-	)
-
-	// Run multiplexer.
-	muxCtx, muxCancel := context.WithCancel(context.Background())
-	defer muxCancel()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		err := mux.Run(muxCtx)
-		if err != nil {
-			log.Errorw("mux error", "err", err)
-
-			processErrChan <- err
-		}
-	}()
-
-	// Start grpc server.
+	// Instantiate grpc server.
 	grpcServer := grpc.NewServer()
 	reflection.Register(grpcServer)
 
@@ -146,44 +126,56 @@ func runAction(c *cli.Context) error {
 		return err
 	}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	group, ctx := errgroup.WithContext(context.Background())
 
+	// Run multiplexer.
+	group.Go(func() error {
+		err := mux.Run(ctx)
+		if err != nil {
+			log.Errorw("mux error", "err", err)
+		}
+
+		return err
+	})
+
+	// Run grpc server.
+	group.Go(func() error {
 		log.Infow("Grpc server starting", "listenAddress", listenAddress)
 		err := grpcServer.Serve(grpcInternalListener)
 		if err != nil && err != grpc.ErrServerStopped {
 			log.Errorw("grpc server error", "err", err)
-
-			processErrChan <- err
 		}
-	}()
 
-	// Wait for break and terminate.
-	log.Infof("Press ctrl-c to exit")
-	sigint := make(chan os.Signal, 1)
-	signal.Notify(sigint, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+		return err
+	})
 
-	var processErr error
-	select {
-	case <-sigint:
-	case processErr = <-processErrChan:
-	}
+	group.Go(func() error {
+		<-ctx.Done()
 
-	// Stop grpc server.
-	log.Infof("Stopping grpc server")
-	grpcServer.Stop()
+		// Stop grpc server.
+		log.Infof("Stopping grpc server")
+		grpcServer.Stop()
 
-	// Stop multiplexer.
-	log.Infof("Stopping multiplexer")
-	muxCancel()
+		return nil
+	})
 
-	log.Infow("Waiting for goroutines to finish")
-	wg.Wait()
+	// Run ctrl-c handler.
+	group.Go(func() error {
+		log.Infof("Press ctrl-c to exit")
 
-	log.Infof("Exiting")
+		sigint := make(chan os.Signal, 1)
+		signal.Notify(sigint, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
-	return processErr
+		select {
+		case <-sigint:
+			return errors.New("user requested termination")
+
+		case <-ctx.Done():
+			return nil
+		}
+	})
+
+	return group.Wait()
 }
 
 func initLndClients(cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
