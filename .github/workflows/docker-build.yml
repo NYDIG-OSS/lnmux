@@ -1,0 +1,80 @@
+name: Create and publish a Docker image
+
+on:
+  push:
+    tags:
+      - v*
+    branches:
+      - master
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the Docker image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+
+      - name: "Debian: Extract metadata (tags, labels) for Docker"
+        id: debian_meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=tag
+            type=sha
+          flavor: |
+            latest=auto
+
+      - name: "Debian: Push Docker image"
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.debian_meta.outputs.tags }}
+          labels: ${{ steps.debian_meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          target: debian
+
+      - name: "Alpine: Extract metadata (tags, labels) for Docker"
+        id: alpine_meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=tag
+            type=sha
+          flavor: |
+            suffix=-alpine
+
+      - name: "Alpine: Push Docker image"
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.alpine_meta.outputs.tags }}
+          labels: ${{ steps.alpine_meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          target: alpine
