@@ -11,6 +11,8 @@ var (
 	// ErrInvoiceNotFound is returned when a targeted invoice can't be
 	// found.
 	ErrInvoiceNotFound = fmt.Errorf("unable to locate invoice")
+
+	ErrHtlcNotFound = fmt.Errorf("unable to locate htlc")
 )
 
 type InvoiceCreationData struct {

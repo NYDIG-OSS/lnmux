@@ -19,26 +19,31 @@ const (
 	resolutionQueueSize = 100
 )
 
+type preSendCallbackFunc func(context.Context, queuedReply) error
+
 type interceptor struct {
-	lnd        lnd.LndClient
-	logger     *zap.SugaredLogger
-	pubKey     common.PubKey
-	htlcChan   chan *interceptedHtlc
-	heightChan chan int
+	lnd             lnd.LndClient
+	logger          *zap.SugaredLogger
+	pubKey          common.PubKey
+	htlcChan        chan *interceptedHtlc
+	heightChan      chan int
+	preSendCallback preSendCallbackFunc
 }
 
 func newInterceptor(lnd lnd.LndClient, logger *zap.SugaredLogger,
-	htlcChan chan *interceptedHtlc, heightChan chan int) *interceptor {
+	htlcChan chan *interceptedHtlc, heightChan chan int,
+	preSendCallback preSendCallbackFunc) *interceptor {
 
 	pubKey := lnd.PubKey()
 	logger = logger.With("node", pubKey)
 
 	return &interceptor{
-		lnd:        lnd,
-		logger:     logger,
-		pubKey:     pubKey,
-		htlcChan:   htlcChan,
-		heightChan: heightChan,
+		lnd:             lnd,
+		logger:          logger,
+		pubKey:          pubKey,
+		htlcChan:        htlcChan,
+		heightChan:      heightChan,
+		preSendCallback: preSendCallback,
 	}
 }
 
@@ -66,6 +71,7 @@ func (i *interceptor) run(ctx context.Context) {
 
 type queuedReply struct {
 	incomingKey types.CircuitKey
+	hash        lntypes.Hash
 	resp        *interceptedHtlcResponse
 }
 
@@ -89,10 +95,15 @@ func (i *interceptor) start(ctx context.Context) error {
 
 	// The block stream immediately sends the current block. Read that to
 	// set our initial height.
+	const initialBlockTimeout = 10 * time.Second
+
 	select {
 	case block := <-blockChan:
 		i.logger.Debugw("Initial block height", "height", block.Height)
 		i.heightChan <- int(block.Height)
+
+	case <-time.After(initialBlockTimeout):
+		return errors.New("initial block height not received")
 
 	case <-ctx.Done():
 		return ctx.Err()
@@ -134,6 +145,10 @@ func (i *interceptor) start(ctx context.Context) error {
 				return errors.New("reply channel full")
 			}
 
+			if err := i.preSendCallback(ctx, item); err != nil {
+				return fmt.Errorf("pre-send callback failed: %w", err)
+			}
+
 			rpcResp := &routerrpc.ForwardHtlcInterceptResponse{
 				IncomingCircuitKey: &routerrpc.CircuitKey{
 					ChanId: item.incomingKey.ChanID,
@@ -145,8 +160,7 @@ func (i *interceptor) start(ctx context.Context) error {
 				FailureCode:    item.resp.failureCode,
 			}
 
-			err := send(rpcResp)
-			if err != nil {
+			if err := send(rpcResp); err != nil {
 				return fmt.Errorf("cannot send: %w", err)
 			}
 
@@ -185,6 +199,7 @@ func (i *interceptor) htlcReceiveLoop(ctx context.Context,
 
 			reply := queuedReply{
 				resp: resp,
+				hash: hash,
 				incomingKey: types.CircuitKey{
 					ChanID: htlc.IncomingCircuitKey.ChanId,
 					HtlcID: htlc.IncomingCircuitKey.HtlcId,

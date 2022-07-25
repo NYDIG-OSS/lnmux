@@ -11,6 +11,8 @@ service Service {
 
     rpc SubscribeInvoiceAccepted (SubscribeInvoiceAcceptedRequest) returns (stream SubscribeInvoiceAcceptedResponse);
 
+    rpc WaitForInvoiceSettled (WaitForInvoiceSettledRequest) returns (WaitForInvoiceSettledResponse);
+
     // Requests settlement for an accepted invoice. This call is idempotent.
     rpc SettleInvoice (SettleInvoiceRequest) returns (SettleInvoiceResponse);
 
@@ -51,6 +53,12 @@ message SubscribeInvoiceAcceptedResponse {
     bytes hash = 1;
     bytes set_id = 2;
 }
+
+message WaitForInvoiceSettledRequest {
+    bytes hash = 1;
+}
+
+message WaitForInvoiceSettledResponse {}
 
 message SettleInvoiceRequest {
     bytes hash = 1;

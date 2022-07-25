@@ -3,6 +3,7 @@ package lnmux
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/bottlepay/lnmux/persistence"
 	"github.com/bottlepay/lnmux/persistence/test"
 	test_common "github.com/bottlepay/lnmux/test"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/go-pg/pg/v10"
@@ -22,6 +24,7 @@ import (
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/record"
 	"github.com/lightningnetwork/lnd/routing/route"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -42,13 +45,15 @@ func createTestLndClient(ctrl *gomock.Controller, pubKey common.PubKey) (
 	*lnd.MockLndClient,
 	chan *routerrpc.ForwardHtlcInterceptRequest,
 	chan *routerrpc.ForwardHtlcInterceptResponse,
-	chan *chainrpc.BlockEpoch) {
+	chan *chainrpc.BlockEpoch,
+	chan struct{}) {
 
 	lndClient := lnd.NewMockLndClient(ctrl)
 	lndClient.EXPECT().PubKey().Return(pubKey).AnyTimes()
 
 	htlcChan := make(chan *routerrpc.ForwardHtlcInterceptRequest)
 	responseChan := make(chan *routerrpc.ForwardHtlcInterceptResponse, 1)
+	closeChan := make(chan struct{})
 	lndClient.EXPECT().HtlcInterceptor(gomock.Any()).
 		DoAndReturn(func(ctx context.Context) (
 			func(*routerrpc.ForwardHtlcInterceptResponse) error,
@@ -67,16 +72,19 @@ func createTestLndClient(ctrl *gomock.Controller, pubKey common.PubKey) (
 
 					case <-ctx.Done():
 						return nil, ctx.Err()
+
+					case <-closeChan:
+						return nil, errors.New("connection closed")
 					}
 				},
 				nil
-		})
+		}).AnyTimes()
 
 	blockChan := make(chan *chainrpc.BlockEpoch)
 	lndClient.EXPECT().RegisterBlockEpochNtfn(gomock.Any()).
-		Return(blockChan, nil, nil)
+		Return(blockChan, nil, nil).AnyTimes()
 
-	return lndClient, htlcChan, responseChan, blockChan
+	return lndClient, htlcChan, responseChan, blockChan, closeChan
 }
 
 func TestMux(t *testing.T) {
@@ -89,8 +97,8 @@ func TestMux(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	lndClient1, htlcChan1, responseChan1, blockChan1 := createTestLndClient(ctrl, testPubKey1)
-	lndClient2, htlcChan2, responseChan2, blockChan2 := createTestLndClient(ctrl, testPubKey2)
+	lndClient1, htlcChan1, responseChan1, blockChan1, closeChan1 := createTestLndClient(ctrl, testPubKey1)
+	lndClient2, htlcChan2, responseChan2, blockChan2, _ := createTestLndClient(ctrl, testPubKey2)
 
 	activeNetParams := &chaincfg.RegressionNetParams
 
@@ -120,11 +128,16 @@ func TestMux(t *testing.T) {
 			Clock:                clock.NewDefaultClock(),
 			FinalCltvRejectDelta: 10,
 			HtlcHoldDuration:     time.Second,
-			AcceptTimeout:        time.Second * 2,
+			AcceptTimeout:        time.Second * 5,
 			Logger:               logger.Sugar(),
 			PrivKey:              testKey,
 		},
 	)
+
+	settledHandler := NewSettledHandler(&SettledHandlerConfig{
+		Persister: db,
+		Logger:    logger.Sugar(),
+	})
 
 	mux, err := New(&MuxConfig{
 		KeyRing:         keyRing,
@@ -132,6 +145,8 @@ func TestMux(t *testing.T) {
 		Lnd:             []lnd.LndClient{lndClient1, lndClient2},
 		Logger:          logger.Sugar(),
 		Registry:        registry,
+		Persister:       db,
+		SettledHandler:  settledHandler,
 	})
 	require.NoError(t, err)
 
@@ -233,10 +248,51 @@ func TestMux(t *testing.T) {
 	htlcChan2 <- receiveHtlc(2, 4000)
 
 	setID := expectAccept(testHash)
+
+	// No settle requested yet and we expect WaitForInvoiceSettled to return an
+	// error.
+	require.ErrorIs(t,
+		settledHandler.WaitForInvoiceSettled(context.Background(), testHash),
+		types.ErrInvoiceNotFound)
+
+	// Disconnect htlc interceptor.
+	closeChan1 <- struct{}{}
+
+	// Wait for disconnect to be processed.
+	time.Sleep(time.Second)
+
+	// Request settle, even though node 1 is still offline.
 	require.NoError(t, registry.RequestSettle(testHash, setID))
 
-	expectResponse(<-responseChan1, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
+	// Expect a settle signal for node 2.
 	expectResponse(<-responseChan2, 2, routerrpc.ResolveHoldForwardAction_SETTLE)
+
+	// Wait for invoice-level settle signal.
+	settledChan := make(chan struct{})
+	go func() {
+		assert.NoError(t,
+			settledHandler.WaitForInvoiceSettled(
+				context.Background(), testHash,
+			))
+
+		close(settledChan)
+	}()
+
+	// Resend block height and htlc to simulate the interceptor coming back
+	// online.
+	blockChan1 <- &chainrpc.BlockEpoch{Height: 1000}
+	htlcChan1 <- receiveHtlc(1, 6000)
+
+	// Expect the other htlc to be settled on node 1 now.
+	expectResponse(<-responseChan1, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
+
+	// Also the settle event is expected now.
+	<-settledChan
+
+	// Waiting for settle again should return immediately with success.
+	require.NoError(t, settledHandler.WaitForInvoiceSettled(
+		context.Background(), testHash,
+	))
 
 	_, htlcs, err := db.Get(context.Background(), testHash)
 	require.NoError(t, err)

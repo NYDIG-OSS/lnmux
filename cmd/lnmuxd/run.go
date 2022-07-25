@@ -94,6 +94,13 @@ func runAction(c *cli.Context) error {
 		},
 	)
 
+	settledHandler := lnmux.NewSettledHandler(
+		&lnmux.SettledHandlerConfig{
+			Logger:    log,
+			Persister: db,
+		},
+	)
+
 	mux, err := lnmux.New(
 		&lnmux.MuxConfig{
 			KeyRing:         keyRing,
@@ -101,6 +108,8 @@ func runAction(c *cli.Context) error {
 			Lnd:             lnds,
 			Logger:          log,
 			Registry:        registry,
+			Persister:       db,
+			SettledHandler:  settledHandler,
 		})
 	if err != nil {
 		return err
@@ -110,7 +119,7 @@ func runAction(c *cli.Context) error {
 	grpcServer := grpc.NewServer()
 	reflection.Register(grpcServer)
 
-	server := newServer(creator, registry)
+	server := newServer(creator, registry, settledHandler)
 
 	lnmuxrpc.RegisterServiceServer(
 		grpcServer, server,
