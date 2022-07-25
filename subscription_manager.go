@@ -44,8 +44,8 @@ func (s *subscriptionManager) generateSubscriptionId() int {
 	return int(atomic.AddUint64(&s.nextSubscriberId, 1))
 }
 
-func (s *subscriptionManager) notifySubscribers(hash lntypes.Hash) {
+func (s *subscriptionManager) notifySubscribers(hash lntypes.Hash, setID [32]byte) {
 	for _, subscriber := range s.acceptSubscriptions {
-		subscriber(hash)
+		subscriber(hash, setID)
 	}
 }

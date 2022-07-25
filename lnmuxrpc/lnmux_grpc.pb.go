@@ -21,7 +21,10 @@ type ServiceClient interface {
 	GetInfo(ctx context.Context, in *GetInfoRequest, opts ...grpc.CallOption) (*GetInfoResponse, error)
 	AddInvoice(ctx context.Context, in *AddInvoiceRequest, opts ...grpc.CallOption) (*AddInvoiceResponse, error)
 	SubscribeInvoiceAccepted(ctx context.Context, in *SubscribeInvoiceAcceptedRequest, opts ...grpc.CallOption) (Service_SubscribeInvoiceAcceptedClient, error)
+	// Requests settlement for an accepted invoice. This call is idempotent.
 	SettleInvoice(ctx context.Context, in *SettleInvoiceRequest, opts ...grpc.CallOption) (*SettleInvoiceResponse, error)
+	// Cancels an accepted invoice. In case settle has been requested
+	// for an invoice, CancelInvoice returns a FailedPrecondition error.
 	CancelInvoice(ctx context.Context, in *CancelInvoiceRequest, opts ...grpc.CallOption) (*CancelInvoiceResponse, error)
 }
 
@@ -108,7 +111,10 @@ type ServiceServer interface {
 	GetInfo(context.Context, *GetInfoRequest) (*GetInfoResponse, error)
 	AddInvoice(context.Context, *AddInvoiceRequest) (*AddInvoiceResponse, error)
 	SubscribeInvoiceAccepted(*SubscribeInvoiceAcceptedRequest, Service_SubscribeInvoiceAcceptedServer) error
+	// Requests settlement for an accepted invoice. This call is idempotent.
 	SettleInvoice(context.Context, *SettleInvoiceRequest) (*SettleInvoiceResponse, error)
+	// Cancels an accepted invoice. In case settle has been requested
+	// for an invoice, CancelInvoice returns a FailedPrecondition error.
 	CancelInvoice(context.Context, *CancelInvoiceRequest) (*CancelInvoiceResponse, error)
 	mustEmbedUnimplementedServiceServer()
 }

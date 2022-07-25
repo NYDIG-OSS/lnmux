@@ -143,19 +143,24 @@ func TestMux(t *testing.T) {
 		errChan <- mux.Run(ctx)
 	}()
 
-	var acceptChan = make(chan lntypes.Hash, 1)
-	cancelAcceptSubscription, err := registry.SubscribeAccept(func(hash lntypes.Hash) {
-		logger.Sugar().Infow("Payment accepted", "hash", hash)
+	var acceptChan = make(chan acceptEvent, 1)
+	cancelAcceptSubscription, err := registry.SubscribeAccept(
+		func(hash lntypes.Hash, setID SetID) {
+			logger.Sugar().Infow("Payment accepted",
+				"hash", hash, "setID", setID)
 
-		acceptChan <- hash
-	})
+			acceptChan <- acceptEvent{hash: hash, setID: setID}
+		},
+	)
 	require.NoError(t, err)
 
-	expectAccept := func(expectedHash lntypes.Hash) {
+	expectAccept := func(expectedHash lntypes.Hash) SetID {
 		t.Helper()
 
-		hash := <-acceptChan
-		require.Equal(t, expectedHash, hash)
+		accept := <-acceptChan
+		require.Equal(t, expectedHash, accept.hash)
+
+		return accept.setID
 	}
 
 	// Send initial block heights.
@@ -227,8 +232,8 @@ func TestMux(t *testing.T) {
 	// Notify arrival of part 2.
 	htlcChan2 <- receiveHtlc(2, 4000)
 
-	expectAccept(testHash)
-	require.NoError(t, registry.RequestSettle(testHash))
+	setID := expectAccept(testHash)
+	require.NoError(t, registry.RequestSettle(testHash, setID))
 
 	expectResponse(<-responseChan1, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
 	expectResponse(<-responseChan2, 2, routerrpc.ResolveHoldForwardAction_SETTLE)
@@ -259,8 +264,8 @@ func TestMux(t *testing.T) {
 
 	htlcChan1 <- receiveHtlc(20, 15000)
 
-	expectAccept(testHash)
-	require.NoError(t, registry.RequestSettle(testHash))
+	setID = expectAccept(testHash)
+	require.NoError(t, registry.RequestSettle(testHash, setID))
 
 	expectResponse(<-responseChan1, 20, routerrpc.ResolveHoldForwardAction_SETTLE)
 
