@@ -14,7 +14,7 @@ func TestSetID(t *testing.T) {
 		{ChanID: 2, HtlcID: 4},
 	}
 
-	expectedHash, _ := hex.DecodeString("cc70fcada0615d5f945db224c5d261d895f381f27298e9e1f96568c32825e3bd")
+	expectedHash, _ := hex.DecodeString("567123ef075dbb9e4d08093a9a52221f3e26ebe728310961d05232796083f1f7")
 
 	hash := newSetID(keys)
 	require.Equal(t, expectedHash, hash[:])

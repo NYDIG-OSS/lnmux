@@ -33,7 +33,7 @@ func newSetID(keys []types.CircuitKey) SetID {
 	for _, key := range sortedKeys {
 		byteOrder.PutUint64(keysBytes[idx:], key.ChanID)
 		byteOrder.PutUint64(keysBytes[idx+8:], key.HtlcID)
-		idx += 8
+		idx += 16
 	}
 
 	hash := sha256.Sum256(keysBytes)
