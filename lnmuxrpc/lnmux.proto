@@ -9,8 +9,6 @@ service Service {
 
     rpc AddInvoice (AddInvoiceRequest) returns (AddInvoiceResponse);
 
-    rpc SubscribeSingleInvoice (SubscribeSingleInvoiceRequest) returns (stream SubscribeSingleInvoiceResponse);
-
     rpc SubscribeInvoiceAccepted (SubscribeInvoiceAcceptedRequest) returns (stream SubscribeInvoiceAcceptedResponse);
 
     rpc SettleInvoice (SettleInvoiceRequest) returns (SettleInvoiceResponse);
@@ -42,20 +40,6 @@ message AddInvoiceResponse {
     string payment_request = 1;
     bytes preimage = 2;
     bytes hash = 3;
-}
-
-message SubscribeSingleInvoiceRequest {
-    bytes hash = 1;
-}
-
-message SubscribeSingleInvoiceResponse {
-    enum InvoiceState {
-      STATE_ACCEPTED = 0;
-      STATE_SETTLE_REQUESTED = 1;
-      STATE_SETTLED = 2;
-    }
-    
-    InvoiceState state = 1;
 }
 
 message SubscribeInvoiceAcceptedRequest {}

@@ -83,12 +83,6 @@ type invoiceRequest struct {
 	errChan chan error
 }
 
-type invoiceSubscription struct {
-	hash     lntypes.Hash
-	callback InvoiceCallback
-	id       int
-}
-
 type invoiceAcceptSubscription struct {
 	callback AcceptCallback
 	id       int
@@ -117,9 +111,6 @@ type InvoiceRegistry struct {
 	autoReleaseHeap *queue.PriorityQueue
 	logger          *zap.SugaredLogger
 
-	newInvoiceSubscription    chan invoiceSubscription
-	cancelInvoiceSubscription chan int
-
 	newInvoiceAcceptSubscription    chan invoiceAcceptSubscription
 	cancelInvoiceAcceptSubscription chan int
 
@@ -141,8 +132,6 @@ func NewRegistry(cdb *persistence.PostgresPersister,
 		cfg:                             cfg,
 		sets:                            newHtlcSets(),
 		htlcChan:                        make(chan *registryHtlc),
-		newInvoiceSubscription:          make(chan invoiceSubscription),
-		cancelInvoiceSubscription:       make(chan int),
 		newInvoiceAcceptSubscription:    make(chan invoiceAcceptSubscription),
 		cancelInvoiceAcceptSubscription: make(chan int),
 		subscriptionManager:             newSubscriptionManager(cfg.Logger),
@@ -174,35 +163,6 @@ func (i *InvoiceRegistry) Run(ctx context.Context) error {
 
 func (i *InvoiceRegistry) AutoSettle() bool {
 	return i.cfg.AutoSettle
-}
-
-func (i *InvoiceRegistry) Subscribe(hash lntypes.Hash,
-	callback InvoiceCallback) (func(), error) {
-
-	subscriberId := i.subscriptionManager.generateSubscriptionId()
-	logger := i.logger.With("id", subscriberId, "hash", hash)
-
-	logger.Debugw("Adding subscriber")
-
-	select {
-	case i.newInvoiceSubscription <- invoiceSubscription{
-		callback: callback,
-		hash:     hash,
-		id:       subscriberId,
-	}:
-
-	case <-i.quit:
-		return nil, ErrShuttingDown
-	}
-
-	return func() {
-		logger.Debugw("Removing subscriber")
-
-		select {
-		case i.cancelInvoiceSubscription <- subscriberId:
-		case <-i.quit:
-		}
-	}, nil
 }
 
 func (i *InvoiceRegistry) SubscribeAccept(callback AcceptCallback) (
@@ -334,19 +294,11 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 				i.logger.Errorf("Process: %v", err)
 			}
 
-		case newSubscription := <-i.newInvoiceSubscription:
-			if err := i.addSubscriber(ctx, newSubscription); err != nil {
-				return err
-			}
-
 		case newAcceptSubscription := <-i.newInvoiceAcceptSubscription:
 			err := i.addAcceptSubscriber(newAcceptSubscription)
 			if err != nil {
 				return err
 			}
-
-		case id := <-i.cancelInvoiceSubscription:
-			i.subscriptionManager.deleteSubscription(id)
 
 		case id := <-i.cancelInvoiceAcceptSubscription:
 			i.subscriptionManager.deleteAcceptSubscription(id)
@@ -411,7 +363,7 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 			}
 
 			// Send settle signal to lnd node(s).
-			err = i.requestSettle(ctx, set)
+			err = i.requestSettle(set)
 			if err != nil {
 				return err
 			}
@@ -424,14 +376,10 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 				// to see if it was already settled or requested to be settled.
 				var requestErr error
 
-				invoice, _, err := i.cdb.Get(ctx, req.hash)
+				_, _, err := i.cdb.Get(ctx, req.hash)
 				switch {
 				case err == nil:
-					if invoice.Settled {
-						requestErr = ErrInvoiceAlreadySettled
-					} else {
-						requestErr = ErrSettleRequested
-					}
+					requestErr = ErrSettleRequested
 
 				case err == types.ErrInvoiceNotFound:
 					requestErr = types.ErrInvoiceNotFound
@@ -483,52 +431,6 @@ func (i *InvoiceRegistry) sendResponse(ch chan error, err error) error {
 	case <-i.quit:
 		return ErrShuttingDown
 	}
-}
-
-func (i *InvoiceRegistry) addSubscriber(ctx context.Context,
-	newSubscription invoiceSubscription) error {
-
-	hash := newSubscription.hash
-
-	// Store subscriber for future updates.
-	i.subscriptionManager.addSubscription(
-		hash, newSubscription.id, newSubscription.callback,
-	)
-
-	// Send open or accepted invoice from memory.
-	var update InvoiceUpdate
-
-	set, ok := i.sets.get(hash)
-	if ok {
-		// No event for partially accepted invoices.
-		if !set.isComplete() {
-			return nil
-		}
-
-		update.State = persistence.InvoiceStateAccepted
-	} else {
-		// Send other states from database.
-		invoice, _, err := i.cdb.Get(ctx, hash)
-		switch {
-		case err == types.ErrInvoiceNotFound:
-			i.logger.Debugw("No initial state to send",
-				"hash", hash, "id", newSubscription.id)
-
-			return nil
-
-		case err != nil:
-			return err
-		}
-
-		update.State = persistence.InvoiceStateSettleRequested
-		if invoice.Settled {
-			update.State = persistence.InvoiceStateSettled
-		}
-	}
-
-	newSubscription.callback(update)
-
-	return nil
 }
 
 func (i *InvoiceRegistry) addAcceptSubscriber(
@@ -857,9 +759,7 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	i.startAcceptTimer(h.rHash)
 
 	// Notify subscriber of accepted invoice.
-	i.subscriptionManager.notifySubscribers(h.rHash, InvoiceUpdate{
-		State: persistence.InvoiceStateAccepted,
-	})
+	i.subscriptionManager.notifySubscribers(h.rHash)
 
 	// Auto-settle invoice if specified.
 	if i.cfg.AutoSettle {
@@ -871,7 +771,7 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 			return err
 		}
 
-		if err := i.requestSettle(ctx, set); err != nil {
+		if err := i.requestSettle(set); err != nil {
 			return err
 		}
 	}
@@ -883,11 +783,7 @@ type InvoiceUpdate struct {
 	State persistence.InvoiceState
 }
 
-func (i *InvoiceRegistry) requestSettle(ctx context.Context,
-	set htlcSet) error {
-
-	hash := set.hash()
-
+func (i *InvoiceRegistry) requestSettle(set htlcSet) error {
 	// Delete in-memory record for this invoice. Only open invoices are
 	// kept in memory.
 	set.deleteAll(func(key types.CircuitKey) {
@@ -901,19 +797,6 @@ func (i *InvoiceRegistry) requestSettle(ctx context.Context,
 
 	// TODO: Wait for final settle event from lnd. Unfortunately this
 	// event is not yet implemented.
-
-	// Mark invoice as settled.
-	if err := i.cdb.Settle(ctx, hash); err != nil {
-		return fmt.Errorf("cannot settle invoice in database: %w", err)
-	}
-
-	// Notify subscriber of settled invoice.
-	i.subscriptionManager.notifySubscribers(
-		hash,
-		InvoiceUpdate{
-			State: persistence.InvoiceStateSettled,
-		},
-	)
 
 	return nil
 }
@@ -952,11 +835,6 @@ func (i *InvoiceRegistry) markSettleRequested(ctx context.Context,
 	if err != nil {
 		return fmt.Errorf("cannot request settle in database: %w", err)
 	}
-
-	// Notify subscriber of settle request.
-	i.subscriptionManager.notifySubscribers(hash, InvoiceUpdate{
-		State: persistence.InvoiceStateSettleRequested,
-	})
 
 	return nil
 }

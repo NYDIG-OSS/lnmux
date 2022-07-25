@@ -53,10 +53,7 @@ func TestSettleInvoice(t *testing.T) {
 		},
 	}, htlcs))
 
-	invoice, htlcs, err := persister.Get(context.Background(), hash)
+	_, htlcs, err = persister.Get(context.Background(), hash)
 	require.NoError(t, err)
 	require.Len(t, htlcs, 2)
-	require.False(t, invoice.Settled)
-
-	require.NoError(t, persister.Settle(context.Background(), hash))
 }

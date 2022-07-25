@@ -16,8 +16,6 @@ import (
 type Invoice struct {
 	InvoiceCreationData
 
-	Settled           bool
-	SettledAt         time.Time
 	SettleRequestedAt time.Time
 }
 
@@ -26,7 +24,6 @@ type InvoiceState int
 const (
 	InvoiceStateAccepted InvoiceState = iota
 	InvoiceStateSettleRequested
-	InvoiceStateSettled
 )
 
 type InvoiceCreationData struct {
@@ -40,8 +37,6 @@ type dbInvoice struct {
 	Preimage   lntypes.Preimage `pg:"preimage"`
 	AmountMsat int64            `pg:"amount_msat,use_zero"`
 
-	Settled           bool      `pg:"settled,use_zero"`
-	SettledAt         time.Time `pg:"settled_at"`
 	SettleRequestedAt time.Time `pg:"settle_requested_at"`
 }
 
@@ -84,8 +79,6 @@ func unmarshallDbInvoice(invoice *dbInvoice) *Invoice {
 				Value:           lnwire.MilliSatoshi(invoice.AmountMsat),
 			},
 		},
-		SettledAt: invoice.SettledAt,
-		Settled:   invoice.Settled,
 	}
 }
 
@@ -154,25 +147,6 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 
 		return nil
 	})
-}
-
-func (p *PostgresPersister) Settle(ctx context.Context,
-	hash lntypes.Hash) error {
-
-	result, err := p.conn.ModelContext(ctx, &dbInvoice{}).
-		Set("settled=?", true).
-		Set("settled_at=?", time.Now().UTC()).
-		Where("hash=?", hash).
-		Where("settled=?", false).
-		Update()
-	if err != nil {
-		return fmt.Errorf("cannot settle invoice: %w", err)
-	}
-	if result.RowsAffected() == 0 {
-		return errors.New("cannot settle invoice")
-	}
-
-	return nil
 }
 
 // Ping pings the database connection to ensure it is available

@@ -20,7 +20,6 @@ const _ = grpc.SupportPackageIsVersion7
 type ServiceClient interface {
 	GetInfo(ctx context.Context, in *GetInfoRequest, opts ...grpc.CallOption) (*GetInfoResponse, error)
 	AddInvoice(ctx context.Context, in *AddInvoiceRequest, opts ...grpc.CallOption) (*AddInvoiceResponse, error)
-	SubscribeSingleInvoice(ctx context.Context, in *SubscribeSingleInvoiceRequest, opts ...grpc.CallOption) (Service_SubscribeSingleInvoiceClient, error)
 	SubscribeInvoiceAccepted(ctx context.Context, in *SubscribeInvoiceAcceptedRequest, opts ...grpc.CallOption) (Service_SubscribeInvoiceAcceptedClient, error)
 	SettleInvoice(ctx context.Context, in *SettleInvoiceRequest, opts ...grpc.CallOption) (*SettleInvoiceResponse, error)
 	CancelInvoice(ctx context.Context, in *CancelInvoiceRequest, opts ...grpc.CallOption) (*CancelInvoiceResponse, error)
@@ -52,40 +51,8 @@ func (c *serviceClient) AddInvoice(ctx context.Context, in *AddInvoiceRequest, o
 	return out, nil
 }
 
-func (c *serviceClient) SubscribeSingleInvoice(ctx context.Context, in *SubscribeSingleInvoiceRequest, opts ...grpc.CallOption) (Service_SubscribeSingleInvoiceClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Service_ServiceDesc.Streams[0], "/lnmux.Service/SubscribeSingleInvoice", opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &serviceSubscribeSingleInvoiceClient{stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-type Service_SubscribeSingleInvoiceClient interface {
-	Recv() (*SubscribeSingleInvoiceResponse, error)
-	grpc.ClientStream
-}
-
-type serviceSubscribeSingleInvoiceClient struct {
-	grpc.ClientStream
-}
-
-func (x *serviceSubscribeSingleInvoiceClient) Recv() (*SubscribeSingleInvoiceResponse, error) {
-	m := new(SubscribeSingleInvoiceResponse)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
 func (c *serviceClient) SubscribeInvoiceAccepted(ctx context.Context, in *SubscribeInvoiceAcceptedRequest, opts ...grpc.CallOption) (Service_SubscribeInvoiceAcceptedClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Service_ServiceDesc.Streams[1], "/lnmux.Service/SubscribeInvoiceAccepted", opts...)
+	stream, err := c.cc.NewStream(ctx, &Service_ServiceDesc.Streams[0], "/lnmux.Service/SubscribeInvoiceAccepted", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +107,6 @@ func (c *serviceClient) CancelInvoice(ctx context.Context, in *CancelInvoiceRequ
 type ServiceServer interface {
 	GetInfo(context.Context, *GetInfoRequest) (*GetInfoResponse, error)
 	AddInvoice(context.Context, *AddInvoiceRequest) (*AddInvoiceResponse, error)
-	SubscribeSingleInvoice(*SubscribeSingleInvoiceRequest, Service_SubscribeSingleInvoiceServer) error
 	SubscribeInvoiceAccepted(*SubscribeInvoiceAcceptedRequest, Service_SubscribeInvoiceAcceptedServer) error
 	SettleInvoice(context.Context, *SettleInvoiceRequest) (*SettleInvoiceResponse, error)
 	CancelInvoice(context.Context, *CancelInvoiceRequest) (*CancelInvoiceResponse, error)
@@ -156,9 +122,6 @@ func (UnimplementedServiceServer) GetInfo(context.Context, *GetInfoRequest) (*Ge
 }
 func (UnimplementedServiceServer) AddInvoice(context.Context, *AddInvoiceRequest) (*AddInvoiceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AddInvoice not implemented")
-}
-func (UnimplementedServiceServer) SubscribeSingleInvoice(*SubscribeSingleInvoiceRequest, Service_SubscribeSingleInvoiceServer) error {
-	return status.Errorf(codes.Unimplemented, "method SubscribeSingleInvoice not implemented")
 }
 func (UnimplementedServiceServer) SubscribeInvoiceAccepted(*SubscribeInvoiceAcceptedRequest, Service_SubscribeInvoiceAcceptedServer) error {
 	return status.Errorf(codes.Unimplemented, "method SubscribeInvoiceAccepted not implemented")
@@ -216,27 +179,6 @@ func _Service_AddInvoice_Handler(srv interface{}, ctx context.Context, dec func(
 		return srv.(ServiceServer).AddInvoice(ctx, req.(*AddInvoiceRequest))
 	}
 	return interceptor(ctx, in, info, handler)
-}
-
-func _Service_SubscribeSingleInvoice_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(SubscribeSingleInvoiceRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(ServiceServer).SubscribeSingleInvoice(m, &serviceSubscribeSingleInvoiceServer{stream})
-}
-
-type Service_SubscribeSingleInvoiceServer interface {
-	Send(*SubscribeSingleInvoiceResponse) error
-	grpc.ServerStream
-}
-
-type serviceSubscribeSingleInvoiceServer struct {
-	grpc.ServerStream
-}
-
-func (x *serviceSubscribeSingleInvoiceServer) Send(m *SubscribeSingleInvoiceResponse) error {
-	return x.ServerStream.SendMsg(m)
 }
 
 func _Service_SubscribeInvoiceAccepted_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -321,11 +263,6 @@ var Service_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "SubscribeSingleInvoice",
-			Handler:       _Service_SubscribeSingleInvoice_Handler,
-			ServerStreams: true,
-		},
 		{
 			StreamName:    "SubscribeInvoiceAccepted",
 			Handler:       _Service_SubscribeInvoiceAccepted_Handler,
