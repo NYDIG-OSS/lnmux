@@ -9,6 +9,7 @@ import (
 
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"go.uber.org/zap"
@@ -63,6 +64,11 @@ func (i *interceptor) run(ctx context.Context) {
 	}
 }
 
+type queuedReply struct {
+	incomingKey types.CircuitKey
+	resp        *interceptedHtlcResponse
+}
+
 func (i *interceptor) start(ctx context.Context) error {
 	var cancel func()
 	ctx, cancel = context.WithCancel(ctx)
@@ -94,10 +100,7 @@ func (i *interceptor) start(ctx context.Context) error {
 
 	var (
 		errChan   = make(chan error, 1)
-		replyChan = make(
-			chan *routerrpc.ForwardHtlcInterceptResponse,
-			resolutionQueueSize,
-		)
+		replyChan = make(chan queuedReply, resolutionQueueSize)
 	)
 
 	var wg sync.WaitGroup
@@ -126,9 +129,20 @@ func (i *interceptor) start(ctx context.Context) error {
 				return ctx.Err()
 			}
 
-		case rpcResp, ok := <-replyChan:
+		case item, ok := <-replyChan:
 			if !ok {
 				return errors.New("reply channel full")
+			}
+
+			rpcResp := &routerrpc.ForwardHtlcInterceptResponse{
+				IncomingCircuitKey: &routerrpc.CircuitKey{
+					ChanId: item.incomingKey.ChanID,
+					HtlcId: item.incomingKey.HtlcID,
+				},
+				Action:         item.resp.action,
+				Preimage:       item.resp.preimage[:],
+				FailureMessage: item.resp.failureMessage,
+				FailureCode:    item.resp.failureCode,
 			}
 
 			err := send(rpcResp)
@@ -147,7 +161,7 @@ func (i *interceptor) start(ctx context.Context) error {
 
 func (i *interceptor) htlcReceiveLoop(ctx context.Context,
 	recv func() (*routerrpc.ForwardHtlcInterceptRequest, error),
-	replyChan chan *routerrpc.ForwardHtlcInterceptResponse) error {
+	replyChan chan queuedReply) error {
 
 	var replyChanClosed bool
 
@@ -169,16 +183,16 @@ func (i *interceptor) htlcReceiveLoop(ctx context.Context,
 				return errors.New("reply channel closed")
 			}
 
-			rpcResp := &routerrpc.ForwardHtlcInterceptResponse{
-				IncomingCircuitKey: htlc.IncomingCircuitKey,
-				Action:             resp.action,
-				Preimage:           resp.preimage[:],
-				FailureMessage:     resp.failureMessage,
-				FailureCode:        resp.failureCode,
+			reply := queuedReply{
+				resp: resp,
+				incomingKey: types.CircuitKey{
+					ChanID: htlc.IncomingCircuitKey.ChanId,
+					HtlcID: htlc.IncomingCircuitKey.HtlcId,
+				},
 			}
 
 			select {
-			case replyChan <- rpcResp:
+			case replyChan <- reply:
 				return nil
 
 			// When the update channel is full, terminate the subscriber
