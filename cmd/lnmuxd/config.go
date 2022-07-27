@@ -10,7 +10,10 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-var DefaultListenAddress = "localhost:19090"
+var (
+	DefaultListenAddress          = "localhost:19090"
+	DefaultInstrumentationAddress = "localhost:2112"
+)
 
 type Config struct {
 	// Lnd contains the configuration of the nodes.
@@ -27,6 +30,10 @@ type Config struct {
 
 	// ListenAddress is the network address that we listen on.
 	ListenAddress string `yaml:"listenAddress"`
+
+	// InstrumentationAddress is the network address that Prometheus
+	// and eventually pprof and/or other instrumentation listen on.
+	InstrumentationAddress string `yaml:"instrumentationAddress"`
 }
 
 func (c *Config) GetIdentityKey() ([32]byte, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,8 +18,10 @@ import (
 	"github.com/bottlepay/lnmux/persistence"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/go-pg/pg/v10"
+	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/keychain"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -115,9 +118,13 @@ func runAction(c *cli.Context) error {
 		return err
 	}
 
-	// Instantiate grpc server.
-	grpcServer := grpc.NewServer()
+	// Instantiate grpc server and enable reflection and Prometheus metrics.
+	grpcServer := grpc.NewServer(
+		grpc.StreamInterceptor(grpc_prometheus.StreamServerInterceptor),
+		grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor),
+	)
 	reflection.Register(grpcServer)
+	grpc_prometheus.Register(grpcServer)
 
 	server := newServer(creator, registry, settledHandler)
 
@@ -133,6 +140,24 @@ func runAction(c *cli.Context) error {
 	grpcInternalListener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return err
+	}
+
+	instAddress := cfg.InstrumentationAddress
+	if instAddress == "" {
+		instAddress = DefaultInstrumentationAddress
+	}
+
+	// Instantiate a new HTTP server and mux.
+	instMux := http.NewServeMux()
+	instMux.Handle("/metrics", promhttp.Handler())
+
+	instServer := &http.Server{
+		Addr:    instAddress,
+		Handler: instMux,
+
+		// Even though this server should only be exposed to trusted
+		// clients, this mitigates slowloris-like DoS attacks.
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	group, ctx := errgroup.WithContext(context.Background())
@@ -166,6 +191,22 @@ func runAction(c *cli.Context) error {
 		grpcServer.Stop()
 
 		return nil
+	})
+
+	group.Go(func() error {
+		log.Infow("Instrumentation HTTP server starting",
+			"instrumentationAddress", instAddress)
+
+		return instServer.ListenAndServe()
+	})
+
+	group.Go(func() error {
+		<-ctx.Done()
+
+		// Stop instrumentation server
+		log.Infow("Instrumentation server stopping")
+
+		return instServer.Close()
 	})
 
 	// Run ctrl-c handler.
