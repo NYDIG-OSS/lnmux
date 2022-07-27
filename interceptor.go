@@ -9,6 +9,7 @@ import (
 
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"go.uber.org/zap"
@@ -18,26 +19,31 @@ const (
 	resolutionQueueSize = 100
 )
 
+type preSendCallbackFunc func(context.Context, queuedReply) error
+
 type interceptor struct {
-	lnd        lnd.LndClient
-	logger     *zap.SugaredLogger
-	pubKey     common.PubKey
-	htlcChan   chan *interceptedHtlc
-	heightChan chan int
+	lnd             lnd.LndClient
+	logger          *zap.SugaredLogger
+	pubKey          common.PubKey
+	htlcChan        chan *interceptedHtlc
+	heightChan      chan int
+	preSendCallback preSendCallbackFunc
 }
 
 func newInterceptor(lnd lnd.LndClient, logger *zap.SugaredLogger,
-	htlcChan chan *interceptedHtlc, heightChan chan int) *interceptor {
+	htlcChan chan *interceptedHtlc, heightChan chan int,
+	preSendCallback preSendCallbackFunc) *interceptor {
 
 	pubKey := lnd.PubKey()
 	logger = logger.With("node", pubKey)
 
 	return &interceptor{
-		lnd:        lnd,
-		logger:     logger,
-		pubKey:     pubKey,
-		htlcChan:   htlcChan,
-		heightChan: heightChan,
+		lnd:             lnd,
+		logger:          logger,
+		pubKey:          pubKey,
+		htlcChan:        htlcChan,
+		heightChan:      heightChan,
+		preSendCallback: preSendCallback,
 	}
 }
 
@@ -63,6 +69,12 @@ func (i *interceptor) run(ctx context.Context) {
 	}
 }
 
+type queuedReply struct {
+	incomingKey types.CircuitKey
+	hash        lntypes.Hash
+	resp        *interceptedHtlcResponse
+}
+
 func (i *interceptor) start(ctx context.Context) error {
 	var cancel func()
 	ctx, cancel = context.WithCancel(ctx)
@@ -83,10 +95,15 @@ func (i *interceptor) start(ctx context.Context) error {
 
 	// The block stream immediately sends the current block. Read that to
 	// set our initial height.
+	const initialBlockTimeout = 10 * time.Second
+
 	select {
 	case block := <-blockChan:
 		i.logger.Debugw("Initial block height", "height", block.Height)
 		i.heightChan <- int(block.Height)
+
+	case <-time.After(initialBlockTimeout):
+		return errors.New("initial block height not received")
 
 	case <-ctx.Done():
 		return ctx.Err()
@@ -94,10 +111,7 @@ func (i *interceptor) start(ctx context.Context) error {
 
 	var (
 		errChan   = make(chan error, 1)
-		replyChan = make(
-			chan *routerrpc.ForwardHtlcInterceptResponse,
-			resolutionQueueSize,
-		)
+		replyChan = make(chan queuedReply, resolutionQueueSize)
 	)
 
 	var wg sync.WaitGroup
@@ -126,13 +140,27 @@ func (i *interceptor) start(ctx context.Context) error {
 				return ctx.Err()
 			}
 
-		case rpcResp, ok := <-replyChan:
+		case item, ok := <-replyChan:
 			if !ok {
 				return errors.New("reply channel full")
 			}
 
-			err := send(rpcResp)
-			if err != nil {
+			if err := i.preSendCallback(ctx, item); err != nil {
+				return fmt.Errorf("pre-send callback failed: %w", err)
+			}
+
+			rpcResp := &routerrpc.ForwardHtlcInterceptResponse{
+				IncomingCircuitKey: &routerrpc.CircuitKey{
+					ChanId: item.incomingKey.ChanID,
+					HtlcId: item.incomingKey.HtlcID,
+				},
+				Action:         item.resp.action,
+				Preimage:       item.resp.preimage[:],
+				FailureMessage: item.resp.failureMessage,
+				FailureCode:    item.resp.failureCode,
+			}
+
+			if err := send(rpcResp); err != nil {
 				return fmt.Errorf("cannot send: %w", err)
 			}
 
@@ -147,7 +175,7 @@ func (i *interceptor) start(ctx context.Context) error {
 
 func (i *interceptor) htlcReceiveLoop(ctx context.Context,
 	recv func() (*routerrpc.ForwardHtlcInterceptRequest, error),
-	replyChan chan *routerrpc.ForwardHtlcInterceptResponse) error {
+	replyChan chan queuedReply) error {
 
 	var replyChanClosed bool
 
@@ -169,16 +197,17 @@ func (i *interceptor) htlcReceiveLoop(ctx context.Context,
 				return errors.New("reply channel closed")
 			}
 
-			rpcResp := &routerrpc.ForwardHtlcInterceptResponse{
-				IncomingCircuitKey: htlc.IncomingCircuitKey,
-				Action:             resp.action,
-				Preimage:           resp.preimage[:],
-				FailureMessage:     resp.failureMessage,
-				FailureCode:        resp.failureCode,
+			reply := queuedReply{
+				resp: resp,
+				hash: hash,
+				incomingKey: types.CircuitKey{
+					ChanID: htlc.IncomingCircuitKey.ChanId,
+					HtlcID: htlc.IncomingCircuitKey.HtlcId,
+				},
 			}
 
 			select {
-			case replyChan <- rpcResp:
+			case replyChan <- reply:
 				return nil
 
 			// When the update channel is full, terminate the subscriber

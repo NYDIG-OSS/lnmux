@@ -53,7 +53,39 @@ func TestSettleInvoice(t *testing.T) {
 		},
 	}, htlcs))
 
-	_, htlcs, err = persister.Get(context.Background(), hash)
+	_, err = persister.MarkHtlcSettled(context.Background(), hash, types.CircuitKey{
+		ChanID: 99,
+		HtlcID: 99,
+	})
+	require.ErrorIs(t, err, types.ErrHtlcNotFound)
+
+	invoiceSettled, err := persister.MarkHtlcSettled(context.Background(), hash, types.CircuitKey{
+		ChanID: 10,
+		HtlcID: 11,
+	})
+	require.NoError(t, err)
+	require.False(t, invoiceSettled)
+
+	invoiceSettled, err = persister.MarkHtlcSettled(context.Background(), hash, types.CircuitKey{
+		ChanID: 10,
+		HtlcID: 11,
+	})
+	require.NoError(t, err)
+	require.False(t, invoiceSettled)
+
+	invoice, _, err := persister.Get(context.Background(), hash)
+	require.NoError(t, err)
+	require.False(t, invoice.Settled)
+
+	invoiceSettled, err = persister.MarkHtlcSettled(context.Background(), hash, types.CircuitKey{
+		ChanID: 11,
+		HtlcID: 12,
+	})
+	require.NoError(t, err)
+	require.True(t, invoiceSettled)
+
+	invoice, htlcs, err = persister.Get(context.Background(), hash)
 	require.NoError(t, err)
 	require.Len(t, htlcs, 2)
+	require.True(t, invoice.Settled)
 }

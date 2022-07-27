@@ -24,18 +24,21 @@ const (
 )
 
 type server struct {
-	registry *lnmux.InvoiceRegistry
-	creator  *lnmux.InvoiceCreator
+	registry       *lnmux.InvoiceRegistry
+	creator        *lnmux.InvoiceCreator
+	settledHandler *lnmux.SettledHandler
 
 	lnmuxrpc.UnimplementedServiceServer
 }
 
 func newServer(creator *lnmux.InvoiceCreator,
-	registry *lnmux.InvoiceRegistry) *server {
+	registry *lnmux.InvoiceRegistry,
+	settledHandler *lnmux.SettledHandler) *server {
 
 	return &server{
-		registry: registry,
-		creator:  creator,
+		registry:       registry,
+		creator:        creator,
+		settledHandler: settledHandler,
 	}
 }
 
@@ -135,6 +138,29 @@ func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAccepted
 			}
 		}
 	}
+}
+
+func (s *server) WaitForInvoiceSettled(ctx context.Context,
+	req *lnmuxrpc.WaitForInvoiceSettledRequest) (
+	*lnmuxrpc.WaitForInvoiceSettledResponse, error) {
+
+	hash, err := lntypes.MakeHash(req.Hash)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.settledHandler.WaitForInvoiceSettled(ctx, hash)
+	switch {
+	case err == types.ErrInvoiceNotFound:
+		return nil, status.Error(
+			codes.NotFound, types.ErrInvoiceNotFound.Error(),
+		)
+
+	case err != nil:
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+
+	return &lnmuxrpc.WaitForInvoiceSettledResponse{}, nil
 }
 
 func (s *server) AddInvoice(ctx context.Context,

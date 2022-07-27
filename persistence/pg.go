@@ -17,6 +17,7 @@ type Invoice struct {
 	InvoiceCreationData
 
 	SettleRequestedAt time.Time
+	Settled           bool
 }
 
 type InvoiceState int
@@ -33,20 +34,28 @@ type InvoiceCreationData struct {
 type dbInvoice struct {
 	tableName struct{} `pg:"lnmux.invoices,discard_unknown_columns"` // nolint
 
-	Hash       lntypes.Hash     `pg:"hash"`
+	Hash       lntypes.Hash     `pg:"hash,pk"`
 	Preimage   lntypes.Preimage `pg:"preimage"`
 	AmountMsat int64            `pg:"amount_msat,use_zero"`
 
 	SettleRequestedAt time.Time `pg:"settle_requested_at"`
+
+	Settled   bool      `pg:"settled,use_zero"`
+	SettledAt time.Time `pg:"settled_at"`
 }
 
 type dbHtlc struct {
 	tableName struct{} `pg:"lnmux.htlcs,discard_unknown_columns"` // nolint
 
 	Hash       lntypes.Hash `pg:"hash"`
-	ChanID     uint64       `pg:"chan_id,use_zero"`
-	HtlcID     uint64       `pg:"htlc_id,use_zero"`
+	ChanID     uint64       `pg:"chan_id,use_zero,pk"`
+	HtlcID     uint64       `pg:"htlc_id,use_zero,pk"`
 	AmountMsat int64        `pg:"amount_msat,use_zero"`
+
+	SettleRequestedAt time.Time `pg:"settle_requested_at"`
+
+	Settled   bool      `pg:"settled,use_zero"`
+	SettledAt time.Time `pg:"settled_at"`
 }
 
 // PostgresPersister persists items to Postgres
@@ -79,6 +88,7 @@ func unmarshallDbInvoice(invoice *dbInvoice) *Invoice {
 				Value:           lnwire.MilliSatoshi(invoice.AmountMsat),
 			},
 		},
+		Settled: invoice.Settled,
 	}
 }
 
@@ -120,11 +130,13 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 	invoice *InvoiceCreationData, htlcs map[types.CircuitKey]int64) error {
 
 	return p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		now := time.Now().UTC()
+
 		dbInvoice := &dbInvoice{
 			Hash:              invoice.PaymentPreimage.Hash(),
 			Preimage:          invoice.PaymentPreimage,
 			AmountMsat:        int64(invoice.Value),
-			SettleRequestedAt: time.Now(),
+			SettleRequestedAt: now,
 		}
 
 		_, err := p.conn.ModelContext(ctx, dbInvoice).Insert()
@@ -134,10 +146,11 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 
 		for key, amt := range htlcs {
 			dbHtlc := dbHtlc{
-				Hash:       invoice.PaymentPreimage.Hash(),
-				ChanID:     key.ChanID,
-				HtlcID:     key.HtlcID,
-				AmountMsat: amt,
+				Hash:              invoice.PaymentPreimage.Hash(),
+				ChanID:            key.ChanID,
+				HtlcID:            key.HtlcID,
+				AmountMsat:        amt,
+				SettleRequestedAt: now,
 			}
 			_, err := tx.Model(&dbHtlc).Insert()
 			if err != nil {
@@ -147,6 +160,65 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 
 		return nil
 	})
+}
+
+func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
+	hash lntypes.Hash, key types.CircuitKey) (bool, error) {
+
+	var invoiceSettled bool
+
+	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		now := time.Now().UTC()
+
+		htlc := dbHtlc{
+			ChanID: key.ChanID,
+			HtlcID: key.HtlcID,
+		}
+
+		result, err := p.conn.ModelContext(ctx, &htlc).
+			WherePK().
+			Where("hash=?", hash).
+			Set("settled=?", true).
+			Set("settled_at=?", now).
+			Update()
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			return types.ErrHtlcNotFound
+		}
+
+		count, err := p.conn.ModelContext(ctx, (*dbHtlc)(nil)).
+			Where("hash=?", hash).
+			Where("settled=?", false).
+			Count()
+		if err != nil {
+			return err
+		}
+
+		if count == 0 {
+			_, err := p.conn.ModelContext(ctx, (*dbInvoice)(nil)).
+				Where("hash=?", hash).
+				Set("settled=?", true).
+				Set("settled_at=?", now).
+				Update()
+			if err != nil {
+				return err
+			}
+			if result.RowsAffected() == 0 {
+				return types.ErrInvoiceNotFound
+			}
+
+			invoiceSettled = true
+		}
+
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+
+	return invoiceSettled, nil
 }
 
 // Ping pings the database connection to ensure it is available

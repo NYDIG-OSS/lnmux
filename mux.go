@@ -8,6 +8,7 @@ import (
 
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
+	"github.com/bottlepay/lnmux/persistence"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/chaincfg"
 	sphinx "github.com/lightningnetwork/lightning-onion"
@@ -22,16 +23,21 @@ import (
 )
 
 type Mux struct {
-	registry *InvoiceRegistry
-	sphinx   *hop.OnionProcessor
+	registry  *InvoiceRegistry
+	sphinx    *hop.OnionProcessor
+	persister *persistence.PostgresPersister
 
 	lnd    []lnd.LndClient
 	logger *zap.SugaredLogger
+
+	settledHandler *SettledHandler
 }
 
 type MuxConfig struct {
 	KeyRing         keychain.SecretKeyRing
 	ActiveNetParams *chaincfg.Params
+	Persister       *persistence.PostgresPersister
+	SettledHandler  *SettledHandler
 
 	Lnd      []lnd.LndClient
 	Logger   *zap.SugaredLogger
@@ -62,10 +68,12 @@ func New(cfg *MuxConfig) (*Mux,
 	sphinx := hop.NewOnionProcessor(sphinxRouter)
 
 	return &Mux{
-		registry: cfg.Registry,
-		sphinx:   sphinx,
-		lnd:      cfg.Lnd,
-		logger:   cfg.Logger,
+		registry:       cfg.Registry,
+		sphinx:         sphinx,
+		persister:      cfg.Persister,
+		lnd:            cfg.Lnd,
+		logger:         cfg.Logger,
+		settledHandler: cfg.SettledHandler,
 	}, nil
 }
 
@@ -115,7 +123,10 @@ func (p *Mux) run(mainCtx context.Context) error {
 	heightChan := make(chan int)
 
 	for _, lnd := range p.lnd {
-		interceptor := newInterceptor(lnd, p.logger, htlcChan, heightChan)
+		interceptor := newInterceptor(
+			lnd, p.logger, htlcChan, heightChan,
+			p.settledHandler.preSendHandler,
+		)
 
 		wg.Add(1)
 		go func(ctx context.Context) {
