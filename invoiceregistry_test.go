@@ -319,6 +319,40 @@ func TestCancel(t *testing.T) {
 	require.ErrorIs(t, c.registry.CancelInvoice(accept.hash, accept.setID), types.ErrInvoiceNotFound)
 }
 
+func TestAcceptTimeout(t *testing.T) {
+	defer test.Timeout()()
+
+	c := newRegistryTestContext(t, false)
+
+	acceptChan, acceptCancel := c.subscribeAccept()
+	defer acceptCancel()
+
+	// Add invoice.
+	invoice, preimage := c.createInvoice(1, time.Hour)
+	hash := preimage.Hash()
+
+	resolved := make(chan HtlcResolution)
+	c.registry.NotifyExitHopHtlc(&registryHtlc{
+		rHash:         hash,
+		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
+		expiry:        100,
+		currentHeight: 0,
+		resolve: func(r HtlcResolution) {
+			resolved <- r
+		},
+		payload: &testPayload{
+			amt:     lnwire.MilliSatoshi(c.testAmt),
+			payAddr: invoice.PaymentAddr,
+		},
+	})
+
+	accept := <-acceptChan
+
+	c.checkHtlcFailed(<-resolved, ResultInvoiceExpired)
+
+	require.ErrorIs(t, c.registry.CancelInvoice(accept.hash, accept.setID), types.ErrInvoiceNotFound)
+}
+
 func TestOverpayment(t *testing.T) {
 	defer test.Timeout()()
 
