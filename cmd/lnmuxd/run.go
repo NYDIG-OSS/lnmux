@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -149,7 +150,25 @@ func runAction(c *cli.Context) error {
 
 	// Instantiate a new HTTP server and mux.
 	instMux := http.NewServeMux()
+
+	// Register the Prometheus handler.
 	instMux.Handle("/metrics", promhttp.Handler())
+
+	// Register the pprof handlers. We do this manually because we aren't
+	// using the default mux.
+	// See issues https://github.com/golang/go/issues/42834 and
+	// https://github.com/golang/go/issues/22085
+	instMux.HandleFunc("/debug/pprof", pprof.Index)
+	instMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	instMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	instMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	instMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	instMux.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+	instMux.Handle("/debug/pprof/block", pprof.Handler("block"))
+	instMux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	instMux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	instMux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+	instMux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
 
 	instServer := &http.Server{
 		Addr:    instAddress,
