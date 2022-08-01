@@ -102,6 +102,9 @@ func (i *interceptor) start(ctx context.Context) error {
 		i.logger.Debugw("Initial block height", "height", block.Height)
 		i.heightChan <- int(block.Height)
 
+	case err := <-blockErrChan:
+		return err
+
 	case <-time.After(initialBlockTimeout):
 		return errors.New("initial block height not received")
 
