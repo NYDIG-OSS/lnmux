@@ -112,7 +112,7 @@ func loadConfig(filename string) (*Config, error) {
 	}
 
 	var cfg Config
-	err = yaml.UnmarshalStrict(yamlFile, &cfg)
+	err = yaml.Unmarshal(yamlFile, &cfg)
 	if err != nil {
 		return nil, err
 	}
