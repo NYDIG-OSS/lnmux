@@ -4,15 +4,18 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"time"
 
 	"gopkg.in/yaml.v2"
 )
 
-var (
+const (
 	DefaultListenAddress          = "localhost:19090"
 	DefaultInstrumentationAddress = "localhost:2112"
+
+	PostgresDSNEnvKey = "LNMUX_PERSISTENCE_POSTGRES_DSN"
+	IdentityKeyEnvKey = "LNMUX_IDENTITY_KEY"
 )
 
 type Config struct {
@@ -106,7 +109,7 @@ type DbConfig struct {
 }
 
 func loadConfig(filename string) (*Config, error) {
-	yamlFile, err := ioutil.ReadFile(filename)
+	yamlFile, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -117,5 +120,18 @@ func loadConfig(filename string) (*Config, error) {
 		return nil, err
 	}
 
+	// Check if the user provides an environment variable for PG DSN and load it
+	loadStringEnvVariable(PostgresDSNEnvKey, &cfg.DB.DSN)
+
+	// Check if the user provides an environment variable for the identity key and load it
+	loadStringEnvVariable(IdentityKeyEnvKey, &cfg.IdentityKey)
+
 	return &cfg, nil
+}
+
+func loadStringEnvVariable(key string, value *string) {
+	if val, ok := os.LookupEnv(key); ok {
+		log.Infof("Environment variable found: %q", key)
+		*value = val
+	}
 }
