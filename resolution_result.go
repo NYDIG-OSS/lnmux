@@ -46,11 +46,16 @@ const (
 	// the database.
 	ResultCannotSettle
 
+	// ResultInvoiceExpired is returned when an invoice has expired.
 	ResultInvoiceExpired
 
 	// ResultNoAcceptSubscriber is returned when an htlc is failed because there
 	// is no application subscribed to accept events.
 	ResultNoAcceptSubscriber
+
+	// ResultAcceptTimeout is returned when the accept timeout is reached
+	// without settlement after an invoice is accepted.
+	ResultAcceptTimeout
 )
 
 // String returns a string representation of the result.
@@ -101,6 +106,9 @@ func (f FailResolutionResult) FailureString() string {
 
 	case ResultNoAcceptSubscriber:
 		return "no accept subscriber"
+
+	case ResultAcceptTimeout:
+		return "accept timeout"
 
 	default:
 		return "unknown failure resolution result"

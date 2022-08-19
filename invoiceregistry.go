@@ -496,7 +496,7 @@ func (i *InvoiceRegistry) failInvoice(hash lntypes.Hash) error {
 
 	// Cancel all accepted htlcs.
 	set.deleteAll(func(key types.CircuitKey) {
-		i.notifyHodlSubscribers(key, NewFailResolution(ResultInvoiceExpired))
+		i.notifyHodlSubscribers(key, NewFailResolution(ResultAcceptTimeout))
 	})
 
 	logger.Infow("Failed invoice")

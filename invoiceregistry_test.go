@@ -348,7 +348,7 @@ func TestAcceptTimeout(t *testing.T) {
 
 	accept := <-acceptChan
 
-	c.checkHtlcFailed(<-resolved, ResultInvoiceExpired)
+	c.checkHtlcFailed(<-resolved, ResultAcceptTimeout)
 
 	require.ErrorIs(t, c.registry.CancelInvoice(accept.hash, accept.setID), types.ErrInvoiceNotFound)
 }
