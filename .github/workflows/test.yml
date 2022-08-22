@@ -15,7 +15,6 @@ jobs:
       postgres:
         image: postgres:14
         env:
-          POSTGRES_DB: bottle_test
           POSTGRES_USER: bottle_test
           POSTGRES_PASSWORD: bottle_test
 
@@ -28,4 +27,4 @@ jobs:
         # populates the client with data, and retrieves data
         run: go test -cover ./...
         env:
-          LNMUX_TEST_DB_DSN: "postgres://bottle_test:bottle_test@postgres/bottle_test?sslmode=disable"
+          LNMUX_TEST_DB_DSN: "postgres://bottle_test:bottle_test@postgres/postgres?sslmode=disable"

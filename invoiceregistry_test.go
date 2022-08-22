@@ -10,7 +10,6 @@ import (
 	"github.com/bottlepay/lnmux/test"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/go-pg/pg/v10"
 	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwire"
@@ -22,9 +21,9 @@ import (
 type registryTestContext struct {
 	t               *testing.T
 	registry        *InvoiceRegistry
-	pg              *pg.DB
 	cfg             *RegistryConfig
 	db              *persistence.PostgresPersister
+	dropDB          func()
 	cancelRegistry  func()
 	registryErrChan chan error
 	logger          *zap.SugaredLogger
@@ -37,7 +36,7 @@ type registryTestContext struct {
 func newRegistryTestContext(t *testing.T, autoSettle bool) *registryTestContext {
 	logger, _ := zap.NewDevelopment()
 
-	pg, db := setupTestDB(t)
+	db, dropDB := setupTestDB(t)
 
 	keyRing := NewKeyRing(testKey)
 
@@ -62,9 +61,9 @@ func newRegistryTestContext(t *testing.T, autoSettle bool) *registryTestContext 
 
 	c := &registryTestContext{
 		t:       t,
-		pg:      pg,
 		cfg:     cfg,
 		db:      db,
+		dropDB:  dropDB,
 		logger:  cfg.Logger,
 		testAmt: 10000,
 		creator: creator,
@@ -99,7 +98,7 @@ func (r *registryTestContext) stop() {
 func (r *registryTestContext) close() {
 	r.stop()
 
-	r.pg.Close()
+	r.dropDB()
 }
 
 func (r *registryTestContext) createInvoice(id int, expiry time.Duration) ( // nolint:unparam
@@ -141,6 +140,7 @@ func (r *registryTestContext) checkHtlcSettled(resolution HtlcResolution) {
 
 func TestInvoiceExpiry(t *testing.T) {
 	defer test.Timeout()()
+	t.Parallel()
 
 	c := newRegistryTestContext(t, false)
 
@@ -171,6 +171,7 @@ func TestInvoiceExpiry(t *testing.T) {
 
 func TestAutoSettle(t *testing.T) {
 	defer test.Timeout()()
+	t.Parallel()
 
 	c := newRegistryTestContext(t, true)
 
@@ -207,6 +208,7 @@ func TestAutoSettle(t *testing.T) {
 // application subscribed to accept events.
 func TestNoSubscriberFail(t *testing.T) {
 	defer test.Timeout()()
+	t.Parallel()
 
 	c := newRegistryTestContext(t, false)
 
@@ -233,6 +235,7 @@ func TestNoSubscriberFail(t *testing.T) {
 
 func TestSettle(t *testing.T) {
 	defer test.Timeout()()
+	t.Parallel()
 
 	c := newRegistryTestContext(t, false)
 
@@ -285,6 +288,7 @@ func TestSettle(t *testing.T) {
 
 func TestCancel(t *testing.T) {
 	defer test.Timeout()()
+	t.Parallel()
 
 	c := newRegistryTestContext(t, false)
 
@@ -321,6 +325,7 @@ func TestCancel(t *testing.T) {
 
 func TestAcceptTimeout(t *testing.T) {
 	defer test.Timeout()()
+	t.Parallel()
 
 	c := newRegistryTestContext(t, false)
 
@@ -355,6 +360,7 @@ func TestAcceptTimeout(t *testing.T) {
 
 func TestOverpayment(t *testing.T) {
 	defer test.Timeout()()
+	t.Parallel()
 
 	c := newRegistryTestContext(t, true)
 

@@ -6,27 +6,32 @@ import (
 
 	"github.com/bottlepay/lnmux/persistence/test"
 	"github.com/bottlepay/lnmux/types"
-	"github.com/go-pg/pg/v10"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
-func setupTestDB(t *testing.T) (*pg.DB, *PostgresPersister) {
-	conn, dsn := test.ResetPGTestDB(t, &test.TestDBSettings{
+func setupTestDB(t *testing.T) (*PostgresPersister, func()) {
+	opts := test.CreatePGTestDB(t, &test.TestDBSettings{
 		MigrationsPath: "./migrations",
 	})
 
 	log := zap.NewNop().Sugar()
-	db, err := NewPostgresPersisterFromDSN(dsn, log)
-	require.NoError(t, err)
+	db := NewPostgresPersisterFromOptions(opts, log)
 
-	return conn, db
+	drop := func() {
+		db.Close()
+		test.DropTestDB(t, *opts)
+	}
+
+	return db, drop
 }
 
 func TestSettleInvoice(t *testing.T) {
-	pg, persister := setupTestDB(t)
-	defer pg.Close()
+	t.Parallel()
+
+	persister, dropDB := setupTestDB(t)
+	defer dropDB()
 
 	preimage := lntypes.Preimage{1}
 	hash := preimage.Hash()

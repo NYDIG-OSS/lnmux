@@ -15,7 +15,6 @@ import (
 	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/go-pg/pg/v10"
 	"github.com/golang/mock/gomock"
 	sphinx "github.com/lightningnetwork/lightning-onion"
 	"github.com/lightningnetwork/lnd/clock"
@@ -99,6 +98,7 @@ func createTestLndClient(ctrl *gomock.Controller,
 
 func TestMux(t *testing.T) {
 	defer test_common.Timeout()()
+	t.Parallel()
 
 	logger, _ := zap.NewDevelopment()
 
@@ -114,8 +114,8 @@ func TestMux(t *testing.T) {
 
 	activeNetParams := &chaincfg.RegressionNetParams
 
-	pg, db := setupTestDB(t)
-	defer pg.Close()
+	db, dropDB := setupTestDB(t)
+	defer dropDB()
 
 	creator, err := NewInvoiceCreator(
 		&InvoiceCreatorConfig{
@@ -385,14 +385,18 @@ func generateSphinxPacket(rt *route.Route, paymentHash []byte,
 	return onionBlob.Bytes(), nil
 }
 
-func setupTestDB(t *testing.T) (*pg.DB, *persistence.PostgresPersister) {
-	conn, dsn := test.ResetPGTestDB(t, &test.TestDBSettings{
+func setupTestDB(t *testing.T) (*persistence.PostgresPersister, func()) {
+	dbSettings := test.CreatePGTestDB(t, &test.TestDBSettings{
 		MigrationsPath: "./persistence/migrations",
 	})
 
 	log := zap.NewNop().Sugar()
-	db, err := persistence.NewPostgresPersisterFromDSN(dsn, log)
-	require.NoError(t, err)
+	db := persistence.NewPostgresPersisterFromOptions(dbSettings, log)
 
-	return conn, db
+	drop := func() {
+		db.Close()
+		test.DropTestDB(t, *dbSettings)
+	}
+
+	return db, drop
 }
