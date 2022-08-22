@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v2"
 )
 
@@ -108,14 +109,21 @@ type DbConfig struct {
 	IdleTimeout time.Duration `yaml:"idleTimeout"`
 }
 
-func loadConfig(filename string) (*Config, error) {
+func loadConfig(c *cli.Context) (*Config, error) {
+	filename := c.String("config")
+	nonStrictConfig := c.Bool(nonStrictConfigFlag.Name)
+
 	yamlFile, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
 
 	var cfg Config
-	err = yaml.Unmarshal(yamlFile, &cfg)
+	if nonStrictConfig {
+		err = yaml.Unmarshal(yamlFile, &cfg)
+	} else {
+		err = yaml.UnmarshalStrict(yamlFile, &cfg)
+	}
 	if err != nil {
 		return nil, err
 	}
