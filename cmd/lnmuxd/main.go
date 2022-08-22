@@ -7,6 +7,11 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+var nonStrictConfigFlag = &cli.BoolFlag{
+	Name:  "non-strict-config",
+	Usage: "If set to true, unknown config fields are silently ignored",
+}
+
 func main() {
 	app := &cli.App{
 		Name: "lnmuxd",
@@ -19,6 +24,7 @@ func main() {
 				Name:    "config",
 				Aliases: []string{"c"},
 			},
+			nonStrictConfigFlag,
 		},
 	}
 

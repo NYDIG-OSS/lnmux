@@ -35,7 +35,7 @@ var runCommand = &cli.Command{
 }
 
 func runAction(c *cli.Context) error {
-	cfg, err := loadConfig(c.String("config"))
+	cfg, err := loadConfig(c)
 	if err != nil {
 		return err
 	}
