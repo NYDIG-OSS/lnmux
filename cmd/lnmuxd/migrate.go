@@ -28,7 +28,7 @@ func migrateAction(c *cli.Context) error {
 		return cli.ShowCommandHelp(c, "migrate")
 	}
 
-	cfg, err := loadConfig(c.String("config"))
+	cfg, err := loadConfig(c)
 	if err != nil {
 		return err
 	}
