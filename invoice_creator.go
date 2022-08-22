@@ -140,7 +140,9 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 	// Use the memo field as the description if it's not empty.
 	// Otherwise, we could have the error "both description and description hash set" in zpay32.NewInvoice
 	// even if `memo` is empty.
-	if len(memo) > 0 {
+	// If 'descHash' is nil, we need to add an empty description to the invoice.
+	// Otherwise, zpay32.NewInvoice will return the error 'neither description nor description hash set'.
+	if len(memo) > 0 || descHash == nil {
 		options = append(options, zpay32.Description(memo))
 	}
 
