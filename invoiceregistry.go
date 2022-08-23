@@ -753,6 +753,20 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	// We are going to accept this htlc. Create in-memory state if that didn't
 	// exist yet.
 	if !setExists {
+		// Don't start a new set if there is currently no application listening
+		// for accept events. This is to prevent htlcs being held on to until
+		// the mpp timeout when no one is listening.
+		//
+		// When we are adding to an existing set, we keep going and assume that
+		// the application will be back online soon.
+		if !i.subscriptionManager.hasSubscribers() {
+			h.resolve(NewFailResolution(
+				ResultNoAcceptSubscriber,
+			))
+
+			return nil
+		}
+
 		set = i.sets.add(
 			&htlcSetParameters{
 				preimage:    statelessData.preimage,

@@ -203,6 +203,34 @@ func TestAutoSettle(t *testing.T) {
 	cancelAcceptUpdates()
 }
 
+// TestNoSubscriberFail asserts that no new set is started when there's no
+// application subscribed to accept events.
+func TestNoSubscriberFail(t *testing.T) {
+	defer test.Timeout()()
+
+	c := newRegistryTestContext(t, false)
+
+	// Add invoice.
+	invoice, preimage := c.createInvoice(1, time.Hour)
+
+	resolved := make(chan HtlcResolution)
+	c.registry.NotifyExitHopHtlc(&registryHtlc{
+		rHash:         preimage.Hash(),
+		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
+		expiry:        100,
+		currentHeight: 0,
+		resolve: func(r HtlcResolution) {
+			resolved <- r
+		},
+		payload: &testPayload{
+			amt:     lnwire.MilliSatoshi(c.testAmt),
+			payAddr: invoice.PaymentAddr,
+		},
+	})
+
+	c.checkHtlcFailed(<-resolved, ResultNoAcceptSubscriber)
+}
+
 func TestSettle(t *testing.T) {
 	defer test.Timeout()()
 
