@@ -3,6 +3,8 @@ package common
 import (
 	"encoding/hex"
 	"fmt"
+
+	"github.com/btcsuite/btcd/btcec/v2"
 )
 
 const PubKeySize = 33
@@ -38,6 +40,17 @@ func NewPubKeyFromStr(v string) (PubKey, error) {
 	}
 
 	return NewPubKeyFromBytes(pubKey)
+}
+
+// NewPubKeyFromKey returns a strongly typed serialized key from a
+// secp256k1.PublicKey instance.
+func NewPubKeyFromKey(key *btcec.PublicKey) PubKey {
+	serialized := key.SerializeCompressed()
+
+	var pubKey PubKey
+	copy(pubKey[:], serialized)
+
+	return pubKey
 }
 
 // String returns a human readable version of the PubKey which is the

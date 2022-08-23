@@ -156,6 +156,8 @@ func (p *Mux) run(mainCtx context.Context) error {
 			}
 
 		case htlc := <-htlcChan:
+			virtualChannel := virtualChannelFromNode(htlc.source)
+
 			// Only intercept htlcs for the virtual channel.
 			if htlc.outgoingChanID != virtualChannel {
 				err := htlc.reply(&interceptedHtlcResponse{
