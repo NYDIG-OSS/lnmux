@@ -224,6 +224,10 @@ func TestMux(t *testing.T) {
 	receiveHtlc := func(sourceNodeIdx int, htlcID uint64,
 		amt int64) {
 
+		virtualChannel := virtualChannelFromNode(
+			l[sourceNodeIdx].client.PubKey(),
+		)
+
 		l[sourceNodeIdx].htlcChan <- &routerrpc.ForwardHtlcInterceptRequest{
 			IncomingCircuitKey:      &routerrpc.CircuitKey{HtlcId: htlcID},
 			PaymentHash:             testHash[:],

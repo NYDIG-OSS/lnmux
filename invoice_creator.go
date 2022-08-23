@@ -18,7 +18,20 @@ import (
 
 var byteOrder = binary.BigEndian
 
-const virtualChannel = 12345
+// virtualChannelFromNode deterministically derives a short channel id for
+// multiplexer for a node pubkey.
+func virtualChannelFromNode(key common.PubKey) uint64 {
+	var b [8]byte
+
+	// Take the final bytes of the key.
+	copy(b[:], key[common.PubKeySize-8:])
+
+	// Force the high bit to make sure there are no collisions with real
+	// channels.
+	b[0] |= 1 << 7
+
+	return byteOrder.Uint64(b[:])
+}
 
 type InvoiceCreatorConfig struct {
 	KeyRing         keychain.SecretKeyRing
@@ -154,6 +167,9 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 
 	// Add virtual hop hints.
 	for _, gwPubKey := range c.gwPubKeys {
+		pubKey := common.NewPubKeyFromKey(gwPubKey)
+		virtualChannel := virtualChannelFromNode(pubKey)
+
 		hopHint := zpay32.HopHint{
 			NodeID:                    gwPubKey,
 			ChannelID:                 virtualChannel, // Rotate?
