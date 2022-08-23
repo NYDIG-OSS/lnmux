@@ -49,3 +49,7 @@ func (s *subscriptionManager) notifySubscribers(hash lntypes.Hash, setID [32]byt
 		subscriber(hash, setID)
 	}
 }
+
+func (s *subscriptionManager) hasSubscribers() bool {
+	return len(s.acceptSubscriptions) > 0
+}
