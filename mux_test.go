@@ -41,12 +41,16 @@ var (
 	}
 )
 
-func createTestLndClient(ctrl *gomock.Controller, pubKey common.PubKey) (
-	*lnd.MockLndClient,
-	chan *routerrpc.ForwardHtlcInterceptRequest,
-	chan *routerrpc.ForwardHtlcInterceptResponse,
-	chan *chainrpc.BlockEpoch,
-	chan struct{}) {
+type testLndClient struct {
+	client       *lnd.MockLndClient
+	htlcChan     chan *routerrpc.ForwardHtlcInterceptRequest
+	responseChan chan *routerrpc.ForwardHtlcInterceptResponse
+	blockChan    chan *chainrpc.BlockEpoch
+	closeChan    chan struct{}
+}
+
+func createTestLndClient(ctrl *gomock.Controller,
+	pubKey common.PubKey) *testLndClient {
 
 	lndClient := lnd.NewMockLndClient(ctrl)
 	lndClient.EXPECT().PubKey().Return(pubKey).AnyTimes()
@@ -84,7 +88,13 @@ func createTestLndClient(ctrl *gomock.Controller, pubKey common.PubKey) (
 	lndClient.EXPECT().RegisterBlockEpochNtfn(gomock.Any()).
 		Return(blockChan, nil, nil).AnyTimes()
 
-	return lndClient, htlcChan, responseChan, blockChan, closeChan
+	return &testLndClient{
+		client:       lndClient,
+		htlcChan:     htlcChan,
+		responseChan: responseChan,
+		blockChan:    blockChan,
+		closeChan:    closeChan,
+	}
 }
 
 func TestMux(t *testing.T) {
@@ -97,8 +107,10 @@ func TestMux(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	lndClient1, htlcChan1, responseChan1, blockChan1, closeChan1 := createTestLndClient(ctrl, testPubKey1)
-	lndClient2, htlcChan2, responseChan2, blockChan2, _ := createTestLndClient(ctrl, testPubKey2)
+	l := []*testLndClient{
+		createTestLndClient(ctrl, testPubKey1),
+		createTestLndClient(ctrl, testPubKey2),
+	}
 
 	activeNetParams := &chaincfg.RegressionNetParams
 
@@ -142,7 +154,7 @@ func TestMux(t *testing.T) {
 	mux, err := New(&MuxConfig{
 		KeyRing:         keyRing,
 		ActiveNetParams: activeNetParams,
-		Lnd:             []lnd.LndClient{lndClient1, lndClient2},
+		Lnd:             []lnd.LndClient{l[0].client, l[1].client},
 		Logger:          logger.Sugar(),
 		Registry:        registry,
 		Persister:       db,
@@ -179,8 +191,8 @@ func TestMux(t *testing.T) {
 	}
 
 	// Send initial block heights.
-	blockChan1 <- &chainrpc.BlockEpoch{Height: 1000}
-	blockChan2 <- &chainrpc.BlockEpoch{Height: 1000}
+	l[0].blockChan <- &chainrpc.BlockEpoch{Height: 1000}
+	l[1].blockChan <- &chainrpc.BlockEpoch{Height: 1000}
 
 	// Generate data for test htlc.
 	dest, err := route.NewVertexFromBytes(keyRing.pubKey.SerializeCompressed())
@@ -232,20 +244,20 @@ func TestMux(t *testing.T) {
 
 	// Notify arrival of part 1.
 	// db.SettleErr = nil
-	htlcChan1 <- receiveHtlc(0, 6000)
+	l[0].htlcChan <- receiveHtlc(0, 6000)
 
 	// Replay arrival of part 1.
-	htlcChan1 <- receiveHtlc(0, 6000)
+	l[0].htlcChan <- receiveHtlc(0, 6000)
 
 	// Let it time out. Expect two responses, one for each notified arrival.
-	expectResponse(<-responseChan1, 0, routerrpc.ResolveHoldForwardAction_FAIL)
-	expectResponse(<-responseChan1, 0, routerrpc.ResolveHoldForwardAction_FAIL)
+	expectResponse(<-l[0].responseChan, 0, routerrpc.ResolveHoldForwardAction_FAIL)
+	expectResponse(<-l[0].responseChan, 0, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	// Notify arrival of part 1.
-	htlcChan1 <- receiveHtlc(1, 6000)
+	l[0].htlcChan <- receiveHtlc(1, 6000)
 
 	// Notify arrival of part 2.
-	htlcChan2 <- receiveHtlc(2, 4000)
+	l[1].htlcChan <- receiveHtlc(2, 4000)
 
 	setID := expectAccept(testHash)
 
@@ -256,7 +268,7 @@ func TestMux(t *testing.T) {
 		types.ErrInvoiceNotFound)
 
 	// Disconnect htlc interceptor.
-	closeChan1 <- struct{}{}
+	l[0].closeChan <- struct{}{}
 
 	// Wait for disconnect to be processed.
 	time.Sleep(time.Second)
@@ -265,7 +277,7 @@ func TestMux(t *testing.T) {
 	require.NoError(t, registry.RequestSettle(testHash, setID))
 
 	// Expect a settle signal for node 2.
-	expectResponse(<-responseChan2, 2, routerrpc.ResolveHoldForwardAction_SETTLE)
+	expectResponse(<-l[1].responseChan, 2, routerrpc.ResolveHoldForwardAction_SETTLE)
 
 	// Wait for invoice-level settle signal.
 	settledChan := make(chan struct{})
@@ -280,11 +292,11 @@ func TestMux(t *testing.T) {
 
 	// Resend block height and htlc to simulate the interceptor coming back
 	// online.
-	blockChan1 <- &chainrpc.BlockEpoch{Height: 1000}
-	htlcChan1 <- receiveHtlc(1, 6000)
+	l[0].blockChan <- &chainrpc.BlockEpoch{Height: 1000}
+	l[0].htlcChan <- receiveHtlc(1, 6000)
 
 	// Expect the other htlc to be settled on node 1 now.
-	expectResponse(<-responseChan1, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
+	expectResponse(<-l[0].responseChan, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
 
 	// Also the settle event is expected now.
 	<-settledChan
@@ -299,12 +311,12 @@ func TestMux(t *testing.T) {
 	require.NotEmpty(t, htlcs)
 
 	// Replay settled htlc.
-	htlcChan1 <- receiveHtlc(1, 6000)
-	expectResponse(<-responseChan1, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
+	l[0].htlcChan <- receiveHtlc(1, 6000)
+	expectResponse(<-l[0].responseChan, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
 
 	// New payment to settled invoice
-	htlcChan1 <- receiveHtlc(10, 10000)
-	expectResponse(<-responseChan1, 10, routerrpc.ResolveHoldForwardAction_FAIL)
+	l[0].htlcChan <- receiveHtlc(10, 10000)
+	expectResponse(<-l[0].responseChan, 10, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	// Create a new invoice.
 	invoice, testPreimage, err = creator.Create(
@@ -318,12 +330,12 @@ func TestMux(t *testing.T) {
 	// Regenerate onion blob for new hash.
 	onionBlob = genOnion()
 
-	htlcChan1 <- receiveHtlc(20, 15000)
+	l[0].htlcChan <- receiveHtlc(20, 15000)
 
 	setID = expectAccept(testHash)
 	require.NoError(t, registry.RequestSettle(testHash, setID))
 
-	expectResponse(<-responseChan1, 20, routerrpc.ResolveHoldForwardAction_SETTLE)
+	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_SETTLE)
 
 	cancelAcceptSubscription()
 
