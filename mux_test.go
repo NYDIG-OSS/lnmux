@@ -221,8 +221,10 @@ func TestMux(t *testing.T) {
 
 	onionBlob := genOnion()
 
-	receiveHtlc := func(htlcID uint64, amt int64) *routerrpc.ForwardHtlcInterceptRequest {
-		return &routerrpc.ForwardHtlcInterceptRequest{
+	receiveHtlc := func(sourceNodeIdx int, htlcID uint64,
+		amt int64) {
+
+		l[sourceNodeIdx].htlcChan <- &routerrpc.ForwardHtlcInterceptRequest{
 			IncomingCircuitKey:      &routerrpc.CircuitKey{HtlcId: htlcID},
 			PaymentHash:             testHash[:],
 			IncomingExpiry:          1050,
@@ -244,20 +246,20 @@ func TestMux(t *testing.T) {
 
 	// Notify arrival of part 1.
 	// db.SettleErr = nil
-	l[0].htlcChan <- receiveHtlc(0, 6000)
+	receiveHtlc(0, 0, 6000)
 
 	// Replay arrival of part 1.
-	l[0].htlcChan <- receiveHtlc(0, 6000)
+	receiveHtlc(0, 0, 6000)
 
 	// Let it time out. Expect two responses, one for each notified arrival.
 	expectResponse(<-l[0].responseChan, 0, routerrpc.ResolveHoldForwardAction_FAIL)
 	expectResponse(<-l[0].responseChan, 0, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	// Notify arrival of part 1.
-	l[0].htlcChan <- receiveHtlc(1, 6000)
+	receiveHtlc(0, 1, 6000)
 
 	// Notify arrival of part 2.
-	l[1].htlcChan <- receiveHtlc(2, 4000)
+	receiveHtlc(1, 2, 4000)
 
 	setID := expectAccept(testHash)
 
@@ -293,7 +295,7 @@ func TestMux(t *testing.T) {
 	// Resend block height and htlc to simulate the interceptor coming back
 	// online.
 	l[0].blockChan <- &chainrpc.BlockEpoch{Height: 1000}
-	l[0].htlcChan <- receiveHtlc(1, 6000)
+	receiveHtlc(0, 1, 6000)
 
 	// Expect the other htlc to be settled on node 1 now.
 	expectResponse(<-l[0].responseChan, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
@@ -311,11 +313,11 @@ func TestMux(t *testing.T) {
 	require.NotEmpty(t, htlcs)
 
 	// Replay settled htlc.
-	l[0].htlcChan <- receiveHtlc(1, 6000)
+	receiveHtlc(0, 1, 6000)
 	expectResponse(<-l[0].responseChan, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
 
 	// New payment to settled invoice
-	l[0].htlcChan <- receiveHtlc(10, 10000)
+	receiveHtlc(0, 10, 10000)
 	expectResponse(<-l[0].responseChan, 10, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	// Create a new invoice.
@@ -330,7 +332,7 @@ func TestMux(t *testing.T) {
 	// Regenerate onion blob for new hash.
 	onionBlob = genOnion()
 
-	l[0].htlcChan <- receiveHtlc(20, 15000)
+	receiveHtlc(0, 20, 15000)
 
 	setID = expectAccept(testHash)
 	require.NoError(t, registry.RequestSettle(testHash, setID))
