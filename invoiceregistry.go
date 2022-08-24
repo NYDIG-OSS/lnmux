@@ -759,7 +759,9 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		//
 		// When we are adding to an existing set, we keep going and assume that
 		// the application will be back online soon.
-		if !i.subscriptionManager.hasSubscribers() {
+		//
+		// This restriction does not apply in auto-settle mode.
+		if !i.cfg.AutoSettle && !i.subscriptionManager.hasSubscribers() {
 			h.resolve(NewFailResolution(
 				ResultNoAcceptSubscriber,
 			))
