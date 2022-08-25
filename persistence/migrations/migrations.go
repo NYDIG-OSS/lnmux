@@ -1,11 +1,16 @@
 package migrations
 
 import (
+	"sync"
+
 	"github.com/go-pg/migrations/v8"
 )
 
-var Collection = migrations.NewCollection()
-var sqlDiscovered = false
+var (
+	sqlDiscoveryOnce sync.Once
+
+	Collection = migrations.NewCollection()
+)
 
 func init() {
 	Collection.DisableSQLAutodiscover(true)
@@ -15,13 +20,15 @@ func init() {
 
 // DiscoverSQLMigrations scans dir for migrations.
 func DiscoverSQLMigrations(dir string) error {
-	if dir == "" {
-		dir = "persistence/migrations"
-	}
-	err := Collection.DiscoverSQLMigrations(dir)
-	if err == nil {
-		sqlDiscovered = true
-	}
+	var err error
+
+	sqlDiscoveryOnce.Do(func() {
+		if dir == "" {
+			dir = "persistence/migrations"
+		}
+
+		err = Collection.DiscoverSQLMigrations(dir)
+	})
 
 	return err
 }
@@ -33,11 +40,9 @@ func DiscoverSQLMigrations(dir string) error {
 // - version - prints current db version.
 // - set_version - sets db version without running migrations.
 func Run(db migrations.DB, a ...string) (int64, int64, error) {
-	if !sqlDiscovered {
-		err := DiscoverSQLMigrations("")
-		if err != nil {
-			return 0, 0, err
-		}
+	err := DiscoverSQLMigrations("")
+	if err != nil {
+		return 0, 0, err
 	}
 
 	return Collection.Run(db, a...)
