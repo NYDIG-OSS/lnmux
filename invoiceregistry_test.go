@@ -18,6 +18,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// registryTestContext contains all the elements needed to spin up a registry
+// for testing.
 type registryTestContext struct {
 	t               *testing.T
 	registry        *InvoiceRegistry
@@ -33,7 +35,48 @@ type registryTestContext struct {
 	creator *InvoiceCreator
 }
 
-func newRegistryTestContext(t *testing.T, autoSettle bool) *registryTestContext {
+// regTestContextOption is a functional argument to newRegistryTestContext()
+// that operates on a registryTestContext which hasn't yet been started.
+type regTestContextOption func(c *registryTestContext)
+
+// optAutoSettle returns a functional argument to newRegistryTestContext()
+// that modifies the AutoSettle configuration in the RegistryConfig.
+func optAutoSettle(autoSettle bool) regTestContextOption {
+	return func(c *registryTestContext) {
+		c.cfg.AutoSettle = autoSettle
+	}
+}
+
+// optHtlcHoldDuration returns a functional argument to newRegistryTestContext()
+// that modifies the HtlcHoldDuration configuration in the RegistryConfig.
+func optHtlcHoldDuration(d time.Duration) regTestContextOption { // nolint:unused
+	return func(c *registryTestContext) {
+		c.cfg.HtlcHoldDuration = d
+	}
+}
+
+// optAcceptTimeout returns a functional argument to newRegistryTestContext()
+// that modifies the AcceptTimeout configuration in the RegistryConfig.
+func optAcceptTimeout(d time.Duration) regTestContextOption {
+	return func(c *registryTestContext) {
+		c.cfg.AcceptTimeout = d
+	}
+}
+
+// optTestAmt returns a functional argument to newRegistryTestContext()
+// that modifies the testAmt configuration.
+func optTestAmt(amt int64) regTestContextOption { // nolint:unused
+	return func(c *registryTestContext) {
+		c.testAmt = amt
+	}
+}
+
+// newRegistryTestContext creates a new registryTestContext, assigns convenient
+// defaults, and applies functional options to modify default values if needed.
+// Then, it starts the registry and associated context/handling and returns it.
+func newRegistryTestContext(t *testing.T,
+	opts ...regTestContextOption) *registryTestContext {
+
 	logger, _ := zap.NewDevelopment()
 
 	db, dropDB := setupTestDB(t)
@@ -49,6 +92,7 @@ func newRegistryTestContext(t *testing.T, autoSettle bool) *registryTestContext 
 	)
 	require.NoError(t, err)
 
+	// Create configuration with convenient defaults.
 	cfg := &RegistryConfig{
 		Clock:                clock.NewDefaultClock(),
 		FinalCltvRejectDelta: 10,
@@ -56,7 +100,6 @@ func newRegistryTestContext(t *testing.T, autoSettle bool) *registryTestContext 
 		AcceptTimeout:        time.Second * 2,
 		Logger:               logger.Sugar(),
 		PrivKey:              testKey,
-		AutoSettle:           autoSettle,
 	}
 
 	c := &registryTestContext{
@@ -67,6 +110,11 @@ func newRegistryTestContext(t *testing.T, autoSettle bool) *registryTestContext 
 		logger:  cfg.Logger,
 		testAmt: 10000,
 		creator: creator,
+	}
+
+	// Apply options to change configuration elements from defaults.
+	for _, opt := range opts {
+		opt(c)
 	}
 
 	c.start()
@@ -142,7 +190,7 @@ func TestInvoiceExpiry(t *testing.T) {
 	defer test.Timeout()()
 	t.Parallel()
 
-	c := newRegistryTestContext(t, false)
+	c := newRegistryTestContext(t)
 
 	// Add invoice.
 	invoice, preimage := c.createInvoice(1, 100*time.Millisecond)
@@ -173,7 +221,7 @@ func TestAutoSettle(t *testing.T) {
 	defer test.Timeout()()
 	t.Parallel()
 
-	c := newRegistryTestContext(t, true)
+	c := newRegistryTestContext(t, optAutoSettle(true))
 
 	// Add invoice.
 	invoice, preimage := c.createInvoice(1, time.Hour)
@@ -210,7 +258,7 @@ func TestNoSubscriberFail(t *testing.T) {
 	defer test.Timeout()()
 	t.Parallel()
 
-	c := newRegistryTestContext(t, false)
+	c := newRegistryTestContext(t)
 
 	// Add invoice.
 	invoice, preimage := c.createInvoice(1, time.Hour)
@@ -237,7 +285,7 @@ func TestSettle(t *testing.T) {
 	defer test.Timeout()()
 	t.Parallel()
 
-	c := newRegistryTestContext(t, false)
+	c := newRegistryTestContext(t)
 
 	acceptChan, acceptCancel := c.subscribeAccept()
 	defer acceptCancel()
@@ -290,7 +338,7 @@ func TestCancel(t *testing.T) {
 	defer test.Timeout()()
 	t.Parallel()
 
-	c := newRegistryTestContext(t, false)
+	c := newRegistryTestContext(t)
 
 	acceptChan, acceptCancel := c.subscribeAccept()
 	defer acceptCancel()
@@ -327,7 +375,7 @@ func TestAcceptTimeout(t *testing.T) {
 	defer test.Timeout()()
 	t.Parallel()
 
-	c := newRegistryTestContext(t, false)
+	c := newRegistryTestContext(t, optAcceptTimeout(200*time.Millisecond))
 
 	acceptChan, acceptCancel := c.subscribeAccept()
 	defer acceptCancel()
@@ -362,7 +410,7 @@ func TestOverpayment(t *testing.T) {
 	defer test.Timeout()()
 	t.Parallel()
 
-	c := newRegistryTestContext(t, true)
+	c := newRegistryTestContext(t, optAutoSettle(true))
 
 	// Add invoice.
 	invoice, preimage := c.createInvoice(1, time.Hour)
