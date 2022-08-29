@@ -212,6 +212,29 @@ func optHtlcID(id uint64) optNotifyHtlc {
 	}
 }
 
+// optCurrentHeight sets the HTLC's current block height.
+func optCurrentHeight(height int32) optNotifyHtlc {
+	return func(h *registryHtlc) {
+		h.currentHeight = height
+	}
+}
+
+// optPayloadAmt sets the amt in the MPP payload. Unspecified results occur
+// when used with optNullPayload.
+func optPayloadAmt(amt int64) optNotifyHtlc {
+	return func(h *registryHtlc) {
+		h.payload.(*testPayload).amt = msat(amt)
+	}
+}
+
+// optNullPayload sets the HTLC payload to nil for testing that the registry
+// rejects the HTLC. Unspecified results occur when used with optPayloadAmt.
+func optNullPayload() optNotifyHtlc {
+	return func(h *registryHtlc) {
+		h.payload = (*nullPayload)(nil)
+	}
+}
+
 // notifyHtlc notifies the registry of an incoming HTLC. It builds the HTLC
 // with convenient defaults.
 func (r *registryTestContext) notifyHtlc(rHash lntypes.Hash, payAddr [32]byte,
@@ -429,6 +452,44 @@ func TestOverpayment(t *testing.T) {
 	cancelAcceptUpdates()
 }
 
+func TestMPPValidity(t *testing.T) {
+	defer test.Timeout()()
+	t.Parallel()
+
+	c := newRegistryTestContext(t, optAutoSettle(true))
+
+	// Create invoice.
+	invoice, preimage := c.createInvoice(1, time.Hour)
+	rHash := preimage.Hash()
+
+	// Test HTLC with no MPP record.
+	c.notifyHtlc(rHash, invoice.PaymentAddr, optHtlcID(1), optNullPayload())
+
+	c.checkHtlcFailed(ResultHtlcInvoiceTypeMismatch)
+
+	// Test MPP with total too low.
+	c.notifyHtlc(rHash, invoice.PaymentAddr, optHtlcID(2), optPayloadAmt(0))
+
+	c.checkHtlcFailed(ResultHtlcSetTotalTooLow)
+
+	// Test MPP with hash mismatching the invoice.
+	c.notifyHtlc(lntypes.ZeroHash, invoice.PaymentAddr, optHtlcID(3))
+
+	c.checkHtlcFailed(ResultAddressMismatch)
+
+	// Test MPP with set total mismatching the invoice.
+	c.notifyHtlc(rHash, invoice.PaymentAddr, optHtlcID(4),
+		optPayloadAmt(c.testAmt-1))
+
+	c.checkHtlcFailed(ResultHtlcSetTotalMismatch)
+
+	// Test MPP with HTLC that expires too soon.
+	c.notifyHtlc(rHash, invoice.PaymentAddr, optHtlcID(5),
+		optCurrentHeight(100))
+
+	c.checkHtlcFailed(ResultExpiryTooSoon)
+}
+
 type testPayload struct {
 	amt     lnwire.MilliSatoshi
 	payAddr [32]byte
@@ -436,6 +497,12 @@ type testPayload struct {
 
 func (t *testPayload) MultiPath() *record.MPP {
 	return record.NewMPP(t.amt, t.payAddr)
+}
+
+type nullPayload struct{}
+
+func (t *nullPayload) MultiPath() *record.MPP {
+	return nil
 }
 
 func msat(n int64) lnwire.MilliSatoshi {
