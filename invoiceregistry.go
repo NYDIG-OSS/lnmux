@@ -679,7 +679,7 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	if statelessData.preimage.Hash() != h.rHash {
 		logger.Debugw("Hash mismatch")
 
-		h.resolve(NewFailResolution(ResultInvoiceNotFound))
+		h.resolve(NewFailResolution(ResultAddressMismatch))
 
 		return nil
 	}
