@@ -28,6 +28,7 @@ type registryTestContext struct {
 	dropDB          func()
 	cancelRegistry  func()
 	registryErrChan chan error
+	resolved        chan HtlcResolution
 	logger          *zap.SugaredLogger
 
 	testAmt int64
@@ -125,6 +126,8 @@ func newRegistryTestContext(t *testing.T,
 }
 
 func (r *registryTestContext) start() {
+	r.resolved = make(chan HtlcResolution)
+
 	r.registryErrChan = make(chan error)
 	r.registry = NewRegistry(r.db, r.cfg)
 
@@ -144,6 +147,12 @@ func (r *registryTestContext) stop() {
 }
 
 func (r *registryTestContext) close() {
+	select {
+	case <-r.resolved:
+		require.FailNow(r.t, "Resolution generated incorrectly")
+	default:
+	}
+
 	r.stop()
 
 	r.dropDB()
@@ -175,15 +184,60 @@ func (r *registryTestContext) subscribeAccept() (chan acceptEvent, func()) {
 	return updateChan, cancel
 }
 
-func (r *registryTestContext) checkHtlcFailed(resolution HtlcResolution,
-	result FailResolutionResult) {
+func (r *registryTestContext) checkHtlcFailed(result FailResolutionResult) {
+	resolution := <-r.resolved
 
 	require.IsType(r.t, &HtlcFailResolution{}, resolution)
 	require.Equal(r.t, result, resolution.(*HtlcFailResolution).Outcome)
 }
 
-func (r *registryTestContext) checkHtlcSettled(resolution HtlcResolution) {
-	require.IsType(r.t, &HtlcSettleResolution{}, resolution)
+func (r *registryTestContext) checkHtlcSettled() {
+	require.IsType(r.t, &HtlcSettleResolution{}, <-r.resolved)
+}
+
+// optNotifyHtlc is a functional option to notifyHtlc.
+type optNotifyHtlc func(h *registryHtlc)
+
+// optAmtPaid changes the amtPaid field of the HTLC.
+func optAmtPaid(amtPaid int64) optNotifyHtlc {
+	return func(h *registryHtlc) {
+		h.amtPaid = msat(amtPaid)
+	}
+}
+
+// optHtlcID sets the HTLC ID for the HTLC's circuit key.
+func optHtlcID(id uint64) optNotifyHtlc {
+	return func(h *registryHtlc) {
+		h.circuitKey.HtlcID = id
+	}
+}
+
+// notifyHtlc notifies the registry of an incoming HTLC. It builds the HTLC
+// with convenient defaults.
+func (r *registryTestContext) notifyHtlc(rHash lntypes.Hash, payAddr [32]byte,
+	opts ...optNotifyHtlc) {
+
+	h := &registryHtlc{
+		rHash:         rHash,
+		amtPaid:       msat(r.testAmt),
+		expiry:        100,
+		currentHeight: 0,
+		payload: &testPayload{
+			amt:     msat(r.testAmt),
+			payAddr: payAddr,
+		},
+		resolve: func(hr HtlcResolution) {
+			go func() {
+				r.resolved <- hr
+			}()
+		},
+	}
+
+	for _, opt := range opts {
+		opt(h)
+	}
+
+	r.registry.NotifyExitHopHtlc(h)
 }
 
 func TestInvoiceExpiry(t *testing.T) {
@@ -199,22 +253,9 @@ func TestInvoiceExpiry(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Send htlc.
-	resolved := make(chan HtlcResolution)
-	c.registry.NotifyExitHopHtlc(&registryHtlc{
-		rHash:         preimage.Hash(),
-		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
-		expiry:        100,
-		currentHeight: 0,
-		resolve: func(r HtlcResolution) {
-			resolved <- r
-		},
-		payload: &testPayload{
-			amt:     lnwire.MilliSatoshi(c.testAmt),
-			payAddr: invoice.PaymentAddr,
-		},
-	})
+	c.notifyHtlc(preimage.Hash(), invoice.PaymentAddr)
 
-	c.checkHtlcFailed(<-resolved, ResultInvoiceExpired)
+	c.checkHtlcFailed(ResultInvoiceExpired)
 }
 
 func TestAutoSettle(t *testing.T) {
@@ -225,29 +266,17 @@ func TestAutoSettle(t *testing.T) {
 
 	// Add invoice.
 	invoice, preimage := c.createInvoice(1, time.Hour)
+	hash := preimage.Hash()
 
 	// Subscribe to updates for invoice.
 	acceptChan, cancelAcceptUpdates := c.subscribeAccept()
 
-	resolved := make(chan struct{})
-	c.registry.NotifyExitHopHtlc(&registryHtlc{
-		rHash:         preimage.Hash(),
-		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
-		expiry:        100,
-		currentHeight: 0,
-		resolve: func(r HtlcResolution) {
-			close(resolved)
-		},
-		payload: &testPayload{
-			amt:     lnwire.MilliSatoshi(c.testAmt),
-			payAddr: invoice.PaymentAddr,
-		},
-	})
+	c.notifyHtlc(hash, invoice.PaymentAddr)
 
 	acceptedInvoice := <-acceptChan
-	require.Equal(t, preimage.Hash(), acceptedInvoice.hash)
+	require.Equal(t, hash, acceptedInvoice.hash)
 
-	<-resolved
+	c.checkHtlcSettled()
 
 	cancelAcceptUpdates()
 }
@@ -263,22 +292,9 @@ func TestNoSubscriberFail(t *testing.T) {
 	// Add invoice.
 	invoice, preimage := c.createInvoice(1, time.Hour)
 
-	resolved := make(chan HtlcResolution)
-	c.registry.NotifyExitHopHtlc(&registryHtlc{
-		rHash:         preimage.Hash(),
-		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
-		expiry:        100,
-		currentHeight: 0,
-		resolve: func(r HtlcResolution) {
-			resolved <- r
-		},
-		payload: &testPayload{
-			amt:     lnwire.MilliSatoshi(c.testAmt),
-			payAddr: invoice.PaymentAddr,
-		},
-	})
+	c.notifyHtlc(preimage.Hash(), invoice.PaymentAddr)
 
-	c.checkHtlcFailed(<-resolved, ResultNoAcceptSubscriber)
+	c.checkHtlcFailed(ResultNoAcceptSubscriber)
 }
 
 func TestSettle(t *testing.T) {
@@ -298,20 +314,7 @@ func TestSettle(t *testing.T) {
 	require.ErrorIs(t, c.registry.RequestSettle(hash, SetID{}), types.ErrInvoiceNotFound)
 	require.ErrorIs(t, c.registry.CancelInvoice(hash, SetID{}), types.ErrInvoiceNotFound)
 
-	resolved := make(chan struct{})
-	c.registry.NotifyExitHopHtlc(&registryHtlc{
-		rHash:         hash,
-		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
-		expiry:        100,
-		currentHeight: 0,
-		resolve: func(r HtlcResolution) {
-			close(resolved)
-		},
-		payload: &testPayload{
-			amt:     lnwire.MilliSatoshi(c.testAmt),
-			payAddr: invoice.PaymentAddr,
-		},
-	})
+	c.notifyHtlc(hash, invoice.PaymentAddr)
 
 	accept := <-acceptChan
 	require.Equal(t, hash, accept.hash)
@@ -320,12 +323,13 @@ func TestSettle(t *testing.T) {
 	require.ErrorIs(t, c.registry.RequestSettle(accept.hash, SetID{}), types.ErrInvoiceNotFound)
 	require.ErrorIs(t, c.registry.CancelInvoice(hash, SetID{}), types.ErrInvoiceNotFound)
 
+	// Settling with the correct hash and set ID should work.
 	require.NoError(t, c.registry.RequestSettle(accept.hash, accept.setID))
+
+	c.checkHtlcSettled()
 
 	// After settling, re-settling with a different set id should still fail.
 	require.ErrorIs(t, c.registry.RequestSettle(accept.hash, SetID{}), types.ErrInvoiceNotFound)
-
-	<-resolved
 
 	// Test idempotency.
 	require.NoError(t, c.registry.RequestSettle(accept.hash, accept.setID))
@@ -347,26 +351,13 @@ func TestCancel(t *testing.T) {
 	invoice, preimage := c.createInvoice(1, time.Hour)
 	hash := preimage.Hash()
 
-	resolved := make(chan struct{})
-	c.registry.NotifyExitHopHtlc(&registryHtlc{
-		rHash:         hash,
-		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
-		expiry:        100,
-		currentHeight: 0,
-		resolve: func(r HtlcResolution) {
-			close(resolved)
-		},
-		payload: &testPayload{
-			amt:     lnwire.MilliSatoshi(c.testAmt),
-			payAddr: invoice.PaymentAddr,
-		},
-	})
+	c.notifyHtlc(hash, invoice.PaymentAddr)
 
 	accept := <-acceptChan
 
 	require.NoError(t, c.registry.CancelInvoice(accept.hash, accept.setID))
 
-	<-resolved
+	c.checkHtlcFailed(ResultInvoiceNotOpen)
 
 	require.ErrorIs(t, c.registry.CancelInvoice(accept.hash, accept.setID), types.ErrInvoiceNotFound)
 }
@@ -384,24 +375,11 @@ func TestAcceptTimeout(t *testing.T) {
 	invoice, preimage := c.createInvoice(1, time.Hour)
 	hash := preimage.Hash()
 
-	resolved := make(chan HtlcResolution)
-	c.registry.NotifyExitHopHtlc(&registryHtlc{
-		rHash:         hash,
-		amtPaid:       lnwire.MilliSatoshi(c.testAmt),
-		expiry:        100,
-		currentHeight: 0,
-		resolve: func(r HtlcResolution) {
-			resolved <- r
-		},
-		payload: &testPayload{
-			amt:     lnwire.MilliSatoshi(c.testAmt),
-			payAddr: invoice.PaymentAddr,
-		},
-	})
+	c.notifyHtlc(hash, invoice.PaymentAddr)
 
 	accept := <-acceptChan
 
-	c.checkHtlcFailed(<-resolved, ResultAcceptTimeout)
+	c.checkHtlcFailed(ResultAcceptTimeout)
 
 	require.ErrorIs(t, c.registry.CancelInvoice(accept.hash, accept.setID), types.ErrInvoiceNotFound)
 }
@@ -419,79 +397,34 @@ func TestOverpayment(t *testing.T) {
 	// Subscribe to updates for invoice.
 	acceptChan, cancelAcceptUpdates := c.subscribeAccept()
 
-	resolved := make(chan HtlcResolution)
-
-	notifyHtlc := func(id uint64, amt int64) {
-		c.registry.NotifyExitHopHtlc(&registryHtlc{
-			rHash:         rHash,
-			amtPaid:       lnwire.MilliSatoshi(amt),
-			expiry:        100,
-			currentHeight: 0,
-			circuitKey: types.CircuitKey{
-				HtlcID: id,
-			},
-			resolve: func(r HtlcResolution) {
-				resolved <- r
-			},
-			payload: &testPayload{
-				amt:     lnwire.MilliSatoshi(c.testAmt),
-				payAddr: invoice.PaymentAddr,
-			},
-		})
-	}
-
 	// Test with full overpayment in a single HTLC.
-	notifyHtlc(1, c.testAmt+1)
+	c.notifyHtlc(rHash, invoice.PaymentAddr, optHtlcID(1),
+		optAmtPaid(c.testAmt+1))
 
-	c.checkHtlcFailed(<-resolved, ResultHtlcSetOverpayment)
-
-	// We should not have a second resolution, an update, or an accept here.
-	select {
-
-	case <-acceptChan:
-		require.FailNow(t, "Invoice accepted incorrectly")
-
-	case <-resolved:
-		require.FailNow(t, "Resolution generated incorrectly")
-
-	case <-time.After(100 * time.Millisecond):
-		// We want enough time here to check for any messages but not
-		// long enough for any HTLCs to time out.
-	}
+	c.checkHtlcFailed(ResultHtlcSetOverpayment)
 
 	// Test with half of the amount in one HTLC and a slight overpayment
 	// in a second HTLC.
 	first := c.testAmt / 2
 	rest := c.testAmt - first
 
-	notifyHtlc(2, first)
-	notifyHtlc(3, rest+1000)
+	c.notifyHtlc(rHash, invoice.PaymentAddr, optHtlcID(2),
+		optAmtPaid(first))
 
-	c.checkHtlcFailed(<-resolved, ResultHtlcSetOverpayment)
+	c.notifyHtlc(rHash, invoice.PaymentAddr, optHtlcID(3),
+		optAmtPaid(rest+1000))
 
-	// We should not have a second resolution, an update, or an accept here.
-	select {
-
-	case <-acceptChan:
-		require.FailNow(t, "Invoice accepted incorrectly")
-
-	case <-resolved:
-		require.FailNow(t, "Resolution generated incorrectly")
-
-	case <-time.After(100 * time.Millisecond):
-		// We want enough time here to check for any messages but not
-		// long enough for any HTLCs to time out.
-	}
+	c.checkHtlcFailed(ResultHtlcSetOverpayment)
 
 	// Send another HTLC that should complete the set and auto-settle
-	notifyHtlc(4, rest)
+	c.notifyHtlc(rHash, invoice.PaymentAddr, optHtlcID(4), optAmtPaid(rest))
 
 	acceptedInvoice := <-acceptChan
 	require.Equal(t, preimage.Hash(), acceptedInvoice.hash)
 
 	// Both of the HTLCs should now resolve as settled.
-	c.checkHtlcSettled(<-resolved)
-	c.checkHtlcSettled(<-resolved)
+	c.checkHtlcSettled()
+	c.checkHtlcSettled()
 
 	cancelAcceptUpdates()
 }
@@ -503,4 +436,8 @@ type testPayload struct {
 
 func (t *testPayload) MultiPath() *record.MPP {
 	return record.NewMPP(t.amt, t.payAddr)
+}
+
+func msat(n int64) lnwire.MilliSatoshi {
+	return lnwire.MilliSatoshi(n)
 }
