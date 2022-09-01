@@ -65,6 +65,11 @@ type PostgresPersister struct {
 	logger *zap.SugaredLogger
 }
 
+// PostgresPersisterConfig is for instantiating PostgresPersister.
+type PostgresPersisterConfig struct {
+	Logger *zap.SugaredLogger
+}
+
 func (p *PostgresPersister) Delete(ctx context.Context, hash lntypes.Hash) error {
 	result, err := p.conn.ModelContext(ctx, (*dbInvoice)(nil)).
 		Where("hash = ?", hash).Delete() // nolint:contextcheck
@@ -238,12 +243,12 @@ func (p *PostgresPersister) Close() error {
 
 // NewPostgresPersisterFromOptions creates a new PostgresPersister using the options provided
 func NewPostgresPersisterFromOptions(options *pg.Options,
-	logger *zap.SugaredLogger) *PostgresPersister {
+	cfg *PostgresPersisterConfig) *PostgresPersister {
 
 	conn := pg.Connect(options)
 
 	persister := &PostgresPersister{
-		logger: logger,
+		logger: cfg.Logger,
 		conn:   conn,
 	}
 
@@ -251,7 +256,7 @@ func NewPostgresPersisterFromOptions(options *pg.Options,
 }
 
 // NewPostgresPersisterFromDSN creates a new PostgresPersister using the dsn provided
-func NewPostgresPersisterFromDSN(dsn string, logger *zap.SugaredLogger) (
+func NewPostgresPersisterFromDSN(dsn string, cfg *PostgresPersisterConfig) (
 	*PostgresPersister, error) {
 
 	options, err := pg.ParseURL(dsn)
@@ -259,5 +264,5 @@ func NewPostgresPersisterFromDSN(dsn string, logger *zap.SugaredLogger) (
 		return nil, err
 	}
 
-	return NewPostgresPersisterFromOptions(options, logger), nil
+	return NewPostgresPersisterFromOptions(options, cfg), nil
 }

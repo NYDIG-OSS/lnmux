@@ -317,7 +317,11 @@ func initPersistence(cfg *Config) (*persistence.PostgresPersister, error) {
 	options.IdleTimeout = cfg.DB.IdleTimeout
 
 	// Setup persistence
-	db := persistence.NewPostgresPersisterFromOptions(options, log)
+	db := persistence.NewPostgresPersisterFromOptions(options,
+		&persistence.PostgresPersisterConfig{
+			Logger: log,
+		})
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 

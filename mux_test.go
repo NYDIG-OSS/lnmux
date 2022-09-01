@@ -390,7 +390,10 @@ func setupTestDB(t *testing.T) (*persistence.PostgresPersister, func()) {
 	})
 
 	log := zap.NewNop().Sugar()
-	db := persistence.NewPostgresPersisterFromOptions(dbSettings, log)
+	db := persistence.NewPostgresPersisterFromOptions(dbSettings,
+		&persistence.PostgresPersisterConfig{
+			Logger: log,
+		})
 
 	drop := func() {
 		db.Close()
