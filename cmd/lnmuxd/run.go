@@ -112,7 +112,6 @@ func runAction(c *cli.Context) error {
 			Lnd:             lnds,
 			Logger:          log,
 			Registry:        registry,
-			Persister:       db,
 			SettledHandler:  settledHandler,
 		})
 	if err != nil {
