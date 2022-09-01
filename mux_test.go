@@ -157,7 +157,6 @@ func TestMux(t *testing.T) {
 		Lnd:             []lnd.LndClient{l[0].client, l[1].client},
 		Logger:          logger.Sugar(),
 		Registry:        registry,
-		Persister:       db,
 		SettledHandler:  settledHandler,
 	})
 	require.NoError(t, err)
