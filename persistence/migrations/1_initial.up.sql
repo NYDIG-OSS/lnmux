@@ -26,3 +26,10 @@ CREATE TABLE htlcs
 
         CONSTRAINT fk_hash FOREIGN KEY(hash) REFERENCES invoices(hash) ON DELETE CASCADE
 );
+
+CREATE TABLE instance_lock
+(
+	"lock_updated_at" TIMESTAMPTZ
+);
+
+INSERT INTO instance_lock VALUES(NOW() - INTERVAL '1 minute');
