@@ -58,28 +58,73 @@ type dbHtlc struct {
 	SettledAt time.Time `pg:"settled_at"`
 }
 
+type dbInstanceLock struct {
+	tableName struct{} `pg:"lnmux.instance_lock, discard_unknown_columns"` // nolint
+
+	LockUpdatedAt time.Time `pg:"lock_updated_at"`
+}
+
 // PostgresPersister persists items to Postgres
 type PostgresPersister struct {
 	conn *pg.DB
 
 	logger *zap.SugaredLogger
+
+	// No mutex required, only accessed inside transactions.
+	lastUpdate time.Time
+
+	lockUpdateInterval       time.Duration
+	lockUpdateStartThreshold time.Duration
 }
+
+const (
+	// DefaultLockUpdateInterval specifies a default for LockUpdateInterval.
+	DefaultLockUpdateInterval = 10 * time.Second
+
+	// DefaultLockUpdateStartThreshold specifies a default for
+	// LockUpdateStartThreshold.
+	DefaultLockUpdateStartThreshold = 30 * time.Second
+)
 
 // PostgresPersisterConfig is for instantiating PostgresPersister.
 type PostgresPersisterConfig struct {
 	Logger *zap.SugaredLogger
+
+	// LockUpdateInterval specifies how often to update the lock_updated_at
+	// timestamp in the instance locks table.
+	LockUpdateInterval time.Duration
+
+	// LockUpdateStartThreshold specifies how long it must be since the
+	// timestamp in the instance locks table has been updated to be allowed
+	// to start.
+	LockUpdateStartThreshold time.Duration
 }
 
 func (p *PostgresPersister) Delete(ctx context.Context, hash lntypes.Hash) error {
-	result, err := p.conn.ModelContext(ctx, (*dbInvoice)(nil)).
-		Where("hash = ?", hash).Delete() // nolint:contextcheck
+	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err := p.checkLockValidity(ctx, tx)
+		if err != nil {
+			// We've lost the lock, close the persister.
+			p.Close()
 
+			return err
+		}
+
+		result, err := p.conn.ModelContext(ctx, (*dbInvoice)(nil)).
+			Where("hash = ?", hash).Delete() // nolint:contextcheck
+
+		if err != nil {
+			return err
+		}
+
+		if result.RowsAffected() == 0 {
+			return errors.New("invoice not found")
+		}
+
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-
-	if result.RowsAffected() == 0 {
-		return errors.New("invoice not found")
 	}
 
 	return nil
@@ -100,32 +145,50 @@ func unmarshallDbInvoice(invoice *dbInvoice) *Invoice {
 func (p *PostgresPersister) Get(ctx context.Context, hash lntypes.Hash) (*Invoice,
 	map[types.CircuitKey]int64, error) {
 
-	var dbInvoice dbInvoice
-	err := p.conn.ModelContext(ctx, &dbInvoice).
-		Where("hash=?", hash).Select()
-	switch {
-	case err == pg.ErrNoRows:
-		return nil, nil, types.ErrInvoiceNotFound
+	var htlcs = make(map[types.CircuitKey]int64)
 
-	case err != nil:
-		return nil, nil, err
-	}
+	var invoice *Invoice
 
-	var dbHtlcs []*dbHtlc
-	err = p.conn.ModelContext(ctx, &dbHtlcs).
-		Where("hash=?", hash).Select()
+	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err := p.checkLockValidity(ctx, tx)
+		if err != nil {
+			// We've lost the lock, close the persister.
+			p.Close()
+
+			return err
+		}
+
+		var dbInvoice dbInvoice
+		err = p.conn.ModelContext(ctx, &dbInvoice).
+			Where("hash=?", hash).Select()
+		switch {
+		case err == pg.ErrNoRows:
+			return types.ErrInvoiceNotFound
+
+		case err != nil:
+			return err
+		}
+
+		var dbHtlcs []*dbHtlc
+		err = p.conn.ModelContext(ctx, &dbHtlcs).
+			Where("hash=?", hash).Select()
+		if err != nil {
+			return err
+		}
+
+		invoice = unmarshallDbInvoice(&dbInvoice)
+
+		for _, htlc := range dbHtlcs {
+			htlcs[types.CircuitKey{
+				ChanID: htlc.ChanID,
+				HtlcID: htlc.HtlcID,
+			}] = htlc.AmountMsat
+		}
+
+		return nil
+	})
 	if err != nil {
 		return nil, nil, err
-	}
-
-	invoice := unmarshallDbInvoice(&dbInvoice)
-
-	htlcs := make(map[types.CircuitKey]int64)
-	for _, htlc := range dbHtlcs {
-		htlcs[types.CircuitKey{
-			ChanID: htlc.ChanID,
-			HtlcID: htlc.HtlcID,
-		}] = htlc.AmountMsat
 	}
 
 	return invoice, htlcs, nil
@@ -135,6 +198,14 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 	invoice *InvoiceCreationData, htlcs map[types.CircuitKey]int64) error {
 
 	return p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err := p.checkLockValidity(ctx, tx)
+		if err != nil {
+			// We've lost the lock, close the persister.
+			p.Close()
+
+			return err
+		}
+
 		now := time.Now().UTC()
 
 		dbInvoice := &dbInvoice{
@@ -144,7 +215,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 			SettleRequestedAt: now,
 		}
 
-		_, err := tx.ModelContext(ctx, dbInvoice).Insert() //nolint:contextcheck
+		_, err = tx.ModelContext(ctx, dbInvoice).Insert() //nolint:contextcheck
 		if err != nil {
 			return err
 		}
@@ -173,6 +244,14 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 	var invoiceSettled bool
 
 	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err := p.checkLockValidity(ctx, tx)
+		if err != nil {
+			// We've lost the lock, close the persister.
+			p.Close()
+
+			return err
+		}
+
 		now := time.Now().UTC()
 
 		htlc := dbHtlc{
@@ -241,6 +320,77 @@ func (p *PostgresPersister) Close() error {
 	return p.conn.Close()
 }
 
+func (p *PostgresPersister) checkLockValidity(ctx context.Context, tx *pg.Tx) error {
+	now := time.Now().UTC()
+
+	if now.Before(p.lastUpdate.Add(p.lockUpdateInterval)) {
+		return nil
+	}
+
+	var lock dbInstanceLock
+
+	err := tx.ModelContext(ctx, &lock).Select()
+	if err != nil {
+		return err
+	}
+
+	if lock.LockUpdatedAt != p.lastUpdate {
+		return errors.New("another instance has lock")
+	}
+
+	result, err := tx.ModelContext(ctx, &dbInstanceLock{
+		LockUpdatedAt: now,
+	}).Where("lock_updated_at = ?", lock.LockUpdatedAt).
+		Update()
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return errors.New("another instance has lock")
+	}
+
+	p.lastUpdate = now
+
+	return nil
+}
+
+func (p *PostgresPersister) checkStartPersister(ctx context.Context) {
+	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		now := time.Now().UTC()
+
+		var lock dbInstanceLock
+
+		err := tx.ModelContext(ctx, &lock).Select()
+		if err != nil {
+			return err
+		}
+
+		if now.Before(lock.LockUpdatedAt.UTC().Add(
+			p.lockUpdateStartThreshold)) {
+
+			return errors.New("another instance has lock")
+		}
+
+		result, err := tx.ModelContext(ctx, &dbInstanceLock{
+			LockUpdatedAt: now,
+		}).Where("lock_updated_at = ?", lock.LockUpdatedAt).
+			Update()
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() != 1 {
+			return errors.New("another instance has lock")
+		}
+
+		p.lastUpdate = now
+
+		return nil
+	})
+	if err != nil {
+		panic(err)
+	}
+}
+
 // NewPostgresPersisterFromOptions creates a new PostgresPersister using the options provided
 func NewPostgresPersisterFromOptions(options *pg.Options,
 	cfg *PostgresPersisterConfig) *PostgresPersister {
@@ -248,9 +398,23 @@ func NewPostgresPersisterFromOptions(options *pg.Options,
 	conn := pg.Connect(options)
 
 	persister := &PostgresPersister{
-		logger: cfg.Logger,
-		conn:   conn,
+		logger:                   cfg.Logger,
+		conn:                     conn,
+		lockUpdateInterval:       cfg.LockUpdateInterval,
+		lockUpdateStartThreshold: cfg.LockUpdateStartThreshold,
 	}
+
+	if int64(persister.lockUpdateInterval) == 0 {
+		persister.lockUpdateInterval = DefaultLockUpdateInterval
+	}
+
+	if int64(persister.lockUpdateStartThreshold) == 0 {
+		persister.lockUpdateStartThreshold = DefaultLockUpdateStartThreshold
+	}
+
+	// TODO(aakselrod): get context from caller? In the config struct or
+	// an argument?
+	persister.checkStartPersister(context.Background())
 
 	return persister
 }
