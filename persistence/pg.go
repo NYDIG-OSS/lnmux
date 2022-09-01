@@ -139,7 +139,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 			SettleRequestedAt: now,
 		}
 
-		_, err := p.conn.ModelContext(ctx, dbInvoice).Insert() //nolint:contextcheck
+		_, err := tx.ModelContext(ctx, dbInvoice).Insert() //nolint:contextcheck
 		if err != nil {
 			return err
 		}
@@ -175,7 +175,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			HtlcID: key.HtlcID,
 		}
 
-		result, err := p.conn.ModelContext(ctx, &htlc).
+		result, err := tx.ModelContext(ctx, &htlc).
 			WherePK().
 			Where("hash=?", hash).
 			Set("settled=?", true).
@@ -188,7 +188,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			return types.ErrHtlcNotFound
 		}
 
-		count, err := p.conn.ModelContext(ctx, (*dbHtlc)(nil)).
+		count, err := tx.ModelContext(ctx, (*dbHtlc)(nil)).
 			Where("hash=?", hash).
 			Where("settled=?", false).
 			Count()
@@ -197,7 +197,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 		}
 
 		if count == 0 {
-			_, err := p.conn.ModelContext(ctx, (*dbInvoice)(nil)).
+			_, err := tx.ModelContext(ctx, (*dbInvoice)(nil)).
 				Where("hash=?", hash).
 				Set("settled=?", true).
 				Set("settled_at=?", now).
