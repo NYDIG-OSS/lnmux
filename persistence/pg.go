@@ -67,7 +67,7 @@ type PostgresPersister struct {
 
 func (p *PostgresPersister) Delete(ctx context.Context, hash lntypes.Hash) error {
 	result, err := p.conn.ModelContext(ctx, (*dbInvoice)(nil)).
-		Where("hash = ?", hash).Delete() // nolint:contextcheck
+		Where("hash = ?", hash).Delete()
 
 	if err != nil {
 		return err
@@ -139,7 +139,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 			SettleRequestedAt: now,
 		}
 
-		_, err := p.conn.ModelContext(ctx, dbInvoice).Insert() //nolint:contextcheck
+		_, err := tx.ModelContext(ctx, dbInvoice).Insert()
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 				AmountMsat:        amt,
 				SettleRequestedAt: now,
 			}
-			_, err := tx.Model(&dbHtlc).Insert() // nolint:contextcheck
+			_, err := tx.Model(&dbHtlc).Insert()
 			if err != nil {
 				return fmt.Errorf("cannot insert htlc: %w", err)
 			}
@@ -175,12 +175,12 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			HtlcID: key.HtlcID,
 		}
 
-		result, err := p.conn.ModelContext(ctx, &htlc).
+		result, err := tx.ModelContext(ctx, &htlc).
 			WherePK().
 			Where("hash=?", hash).
 			Set("settled=?", true).
 			Set("settled_at=?", now).
-			Update() // nolint:contextcheck
+			Update()
 		if err != nil {
 			return err
 		}
@@ -188,7 +188,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			return types.ErrHtlcNotFound
 		}
 
-		count, err := p.conn.ModelContext(ctx, (*dbHtlc)(nil)).
+		count, err := tx.ModelContext(ctx, (*dbHtlc)(nil)).
 			Where("hash=?", hash).
 			Where("settled=?", false).
 			Count()
@@ -197,11 +197,11 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 		}
 
 		if count == 0 {
-			_, err := p.conn.ModelContext(ctx, (*dbInvoice)(nil)).
+			_, err := tx.ModelContext(ctx, (*dbInvoice)(nil)).
 				Where("hash=?", hash).
 				Set("settled=?", true).
 				Set("settled_at=?", now).
-				Update() // nolint:contextcheck
+				Update()
 			if err != nil {
 				return err
 			}
