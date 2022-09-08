@@ -6,6 +6,7 @@ on:
       - v*
     branches:
       - master
+      - failed-payment-debug
 
 env:
   REGISTRY: ghcr.io
