@@ -67,7 +67,7 @@ type PostgresPersister struct {
 
 func (p *PostgresPersister) Delete(ctx context.Context, hash lntypes.Hash) error {
 	result, err := p.conn.ModelContext(ctx, (*dbInvoice)(nil)).
-		Where("hash = ?", hash).Delete()
+		Where("hash = ?", hash).Delete() // nolint:contextcheck
 
 	if err != nil {
 		return err
@@ -139,7 +139,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 			SettleRequestedAt: now,
 		}
 
-		_, err := tx.ModelContext(ctx, dbInvoice).Insert()
+		_, err := tx.ModelContext(ctx, dbInvoice).Insert() //nolint:contextcheck
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 				AmountMsat:        amt,
 				SettleRequestedAt: now,
 			}
-			_, err := tx.Model(&dbHtlc).Insert()
+			_, err := tx.Model(&dbHtlc).Insert() // nolint:contextcheck
 			if err != nil {
 				return fmt.Errorf("cannot insert htlc: %w", err)
 			}
@@ -180,7 +180,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			Where("hash=?", hash).
 			Set("settled=?", true).
 			Set("settled_at=?", now).
-			Update()
+			Update() // nolint:contextcheck
 		if err != nil {
 			return err
 		}
@@ -201,7 +201,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 				Where("hash=?", hash).
 				Set("settled=?", true).
 				Set("settled_at=?", now).
-				Update()
+				Update() // nolint:contextcheck
 			if err != nil {
 				return err
 			}
