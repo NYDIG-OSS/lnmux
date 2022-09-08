@@ -63,6 +63,8 @@ func (p *SettledHandler) preSendHandler(ctx context.Context, item queuedReply) e
 func (p *SettledHandler) WaitForInvoiceSettled(ctx context.Context,
 	hash lntypes.Hash) error {
 
+	logger := p.logger.With("hash", hash)
+
 	waitChan := make(chan struct{}, 1)
 
 	// First subscribe to the settled event. Otherwise a race condition could
@@ -77,12 +79,16 @@ func (p *SettledHandler) WaitForInvoiceSettled(ctx context.Context,
 		return err
 	}
 	if invoice.Settled {
+		logger.Infow("Wait for invoice settled completed via db")
+
 		return nil
 	}
 
 	// Not settled yet. Wait for the event.
 	select {
 	case <-waitChan:
+		logger.Infow("Wait for invoice settled completed via wait channel")
+
 		return nil
 
 	case <-ctx.Done():
