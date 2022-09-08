@@ -9,6 +9,8 @@ import (
 	"github.com/bottlepay/lnmux/lnmuxrpc"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lntypes"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -73,8 +75,17 @@ type acceptedEvent struct {
 	setID [32]byte
 }
 
+var subscriberGaugeMetric = promauto.NewGauge(
+	prometheus.GaugeOpts{
+		Name: "lnmux_invoice_accepted_subscribers",
+	},
+)
+
 func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAcceptedRequest,
 	subscription lnmuxrpc.Service_SubscribeInvoiceAcceptedServer) error {
+
+	subscriberGaugeMetric.Inc()
+	defer subscriberGaugeMetric.Dec()
 
 	var (
 		bufferChan = make(chan acceptedEvent, subscriberQueueSize)
