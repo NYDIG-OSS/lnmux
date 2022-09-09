@@ -39,13 +39,24 @@ type Config struct {
 	// and eventually pprof and/or other instrumentation listen on.
 	InstrumentationAddress string `yaml:"instrumentationAddress"`
 
-	Logging LoggingConfig `mapstructure:"logging" json:"logging" yaml:"logging"`
+	Logging LoggingConfig `yaml:"logging"`
 
 	DistributedLock DistributedLockConfig `mapstructure:"distributedLock" json:"distributedLock" yaml:"distributedLock"`
 }
 
 // LoggingConfig contains options related to log outputs.
 type LoggingConfig struct {
+	// Level defined the minimum log level to be output
+	Level string `yaml:"level"`
+
+	// Format defined the output format:
+	//  'console' will be human-readable
+	//  'json' will be machine-readable.
+	Format string `yaml:"format"`
+
+	// WithCaller indicates if the caller is displayed in the log
+	WithCaller bool `yaml:"withCaller"`
+
 	// Enables grpc-level logging output.
 	GrpcLogging bool `yaml:"grpcLogging"`
 

@@ -21,6 +21,7 @@ For the setup, it is assumed that there are multiple LND nodes running with conn
   * LND nodes configuration: TLS certificate, macaroon, address and pubkey. Pubkey is configured as a protection against unintentionally connecting to the wrong node.
   * Postgres connection string for the database created above (can be overridden by the environment variable `LNMUX_PERSISTENCE_POSTGRES_DSN` to avoid exposing credentials).
   * 32-byte Identity PRIVATE key. This key is used to generate invoices and decode incoming htlcs. In a production environment, this key must be protected carefully (can be overridden by the environment variable `LNMUX_IDENTITY_KEY` to avoid exposing the private key).
+  * Your logging configuration. The most important options are the logs level, the encoding format and the activation of grpc logs.
 
 * Initialize the database: `go run ./cmd/lnmuxd -c lnmux.yml migrate init`
 

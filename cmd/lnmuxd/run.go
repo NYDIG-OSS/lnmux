@@ -43,6 +43,11 @@ func runAction(c *cli.Context) error {
 		return err
 	}
 
+	err = initLogger(cfg.Logging.Level, cfg.Logging.Format, cfg.Logging.WithCaller)
+	if err != nil {
+		return err
+	}
+
 	releaseLock, err := initDistributedLock(&cfg.DistributedLock)
 	if err != nil {
 		return err
