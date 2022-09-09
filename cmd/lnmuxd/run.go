@@ -14,6 +14,7 @@ import (
 
 	"github.com/bottlepay/lnmux"
 	"github.com/bottlepay/lnmux/common"
+	"github.com/bottlepay/lnmux/dlock"
 	"github.com/bottlepay/lnmux/lnd"
 	"github.com/bottlepay/lnmux/lnmuxrpc"
 	"github.com/bottlepay/lnmux/persistence"
@@ -41,6 +42,12 @@ func runAction(c *cli.Context) error {
 	if err != nil {
 		return err
 	}
+
+	releaseLock, err := initDistributedLock(&cfg.DistributedLock)
+	if err != nil {
+		return err
+	}
+	defer releaseLock()
 
 	// Setup persistence.
 	db, err := initPersistence(cfg)
@@ -367,4 +374,21 @@ func initPersistence(cfg *Config) (*persistence.PostgresPersister, error) {
 	}
 
 	return db, nil
+}
+
+func initDistributedLock(cfg *DistributedLockConfig) (func(), error) {
+	// Do nothing if no lock name is specified.
+	if cfg.Name == "" {
+		log.Infow("Not using leader election")
+
+		return func() {}, nil
+	}
+
+	return dlock.New(&dlock.LockConfig{
+		Namespace:     cfg.Namespace,
+		Name:          cfg.Name,
+		ID:            cfg.ID,
+		DevKubeConfig: cfg.DevKubeConfig,
+		Logger:        log,
+	})
 }

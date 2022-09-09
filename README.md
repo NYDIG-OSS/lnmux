@@ -108,6 +108,15 @@ If you've set up `lnmuxd` correctly, output similar to what is shown below is ex
 2022-04-19T08:39:23.237+0200	DEBUG	Sending settle resolution	{"hash": "fd3b0f9a077006697ba8f82cc5673d1511cb11d1d1012662bf0c0b3c93f4245e", "source": "026ff75cb2ff49b864833aa3c93970069070231a9ad64819252e190406dd0a6976", "circuitKey": "1161084279062528:7", "outcome": "settled"}
 ```
 
+## Leader election
+
+Lnmux is designed as a single-instance process. Running multiple instances
+connected to the same database simultaneously results in incorrect behavior and
+may put funds at risk.
+
+To ensure that there can only ever be one instance running, k8s leader election
+can be enabled via the `DistributedLock` config group.
+
 ## Invoice lifecycle
 
 ![](invoice_lifecycle.png)
