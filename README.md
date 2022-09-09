@@ -133,9 +133,60 @@ Note that only the states `accepted`, `settle requested` and `settled` are publi
 
 The transition from `settle requested` to `settled` can be made more robust in the future. This transition is happening already, but not backed by an actual final settle event from lnd. See https://github.com/lightningnetwork/lnd/issues/6208.
 
+## Docker Instructions
+
+We provide a Dockerfile to launch lnmux using docker.
+
+This Dockerfile will build 2 different images: one for debian and the other one for alpine.
+
+You have 2 options to get the lnmux image:
+
+- Either, building it by yourself: navigate to the lnmux repository and simply do:
+  ```bash
+  docker build -t lnmux .
+  ```
+  
+- Or pull directly the image we pushed into ghcr.io (You can check existing images [here](https://github.com/bottlepay/lnmux/pkgs/container/lnmux/versions?filters%5Bversion_type%5D=tagged))
+  ```bash
+     docker pull ghcr.io/bottlepay/lnmux:{tag|sha}
+  ```
+
+
+**However**, we don't provide any configuration file in the Dockerfile (and don't do the migration either).
+You need to provide certificates (TLS/Macaroon) as well to connect lnd nodes.
+
+To do so, you can simply use `--mount`:
+
+```bash
+ docker run -it \
+  --mount type=bind,source="$(pwd)/lnmux.yml",target=/app/lnmux.yml \
+  --mount type=bind,source="$(pwd)/lnd/certs",target=/app/certs  \
+  ghcr.io/bottlepay/lnmux:sha-bf41263-alpine /bin/sh -c \
+  "/usr/bin/lnmuxd -c /app/lnmux.yml migrate init && \
+   /usr/bin/lnmuxd -c /app/lnmux.yml migrate up && \
+   /usr/bin/lnmuxd -c /app/lnmux.yml run"
+
+```
+
+
+> ⚠️ Don't forget to add **before starting nodes connected to lnmux** (aka Alice and Bob):
+> - `--requireinterceptor` to make sure all htlcs are intercepted
+> - `--tlsextradomain=host.docker.internal` to add docker DSN to TLS certs (otherwise you can't connect from a docker container)
+>
+> If your nodes are already started, you will have to stop them, remove manually tls certs and then restart them.
+> 
+> Furthermore, you must use `host.docker.internal` instead of `localhost` in your configuration
+> (plus --add-host host.docker.internal:host-gateway for Linux users).
+
 ## Regtest testing
 
-The minimal setup to test on regtest is to create three LND nodes A, B and C. Create channels between B and A and between B and C. Connect `lnmuxd` to the nodes A and C. Pay invoices from node B, while experimenting with online status and liquidity of A and C.
+The minimal setup to test on regtest is to create three LND nodes Alice, Bob and Carol.
+Alice and Bob should have a channel with Carol, and `lnmuxd` should be connected to Alice and Bob.
+
+The typical workflow is:
+- Create invoices using lnmux
+- Carol pays the invoices
+- lnmux generates accepted events and settles the invoices either through Alice or Bob.
 
 ## Experimental
 
