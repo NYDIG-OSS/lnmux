@@ -38,6 +38,17 @@ type Config struct {
 	// InstrumentationAddress is the network address that Prometheus
 	// and eventually pprof and/or other instrumentation listen on.
 	InstrumentationAddress string `yaml:"instrumentationAddress"`
+
+	Logging LoggingConfig `mapstructure:"logging" json:"logging" yaml:"logging"`
+}
+
+// LoggingConfig contains options related to log outputs.
+type LoggingConfig struct {
+	// Enables grpc-level logging output.
+	GrpcLogging bool `yaml:"grpcLogging"`
+
+	// Enables grpc-level payload logging output.
+	GrpcPayloadLogging bool `yaml:"grpcPayloadLogging"`
 }
 
 func (c *Config) GetIdentityKey() ([32]byte, error) {

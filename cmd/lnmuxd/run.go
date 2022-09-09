@@ -19,6 +19,8 @@ import (
 	"github.com/bottlepay/lnmux/persistence"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/go-pg/pg/v10"
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/keychain"
@@ -120,10 +122,48 @@ func runAction(c *cli.Context) error {
 	}
 
 	// Instantiate grpc server and enable reflection and Prometheus metrics.
+	streamInterceptors := []grpc.StreamServerInterceptor{
+		grpc_prometheus.StreamServerInterceptor,
+	}
+
+	unaryInterceptors := []grpc.UnaryServerInterceptor{
+		grpc_prometheus.UnaryServerInterceptor,
+	}
+
+	if cfg.Logging.GrpcLogging {
+		unaryInterceptors = append(unaryInterceptors,
+			grpc_zap.UnaryServerInterceptor(log.Desugar()),
+		)
+		streamInterceptors = append(streamInterceptors,
+			grpc_zap.StreamServerInterceptor(log.Desugar()),
+		)
+	}
+
+	if cfg.Logging.GrpcPayloadLogging {
+		decider := func(ctx context.Context, fullMethodName string,
+			servingObject interface{}) bool {
+
+			// Log everything.
+			return true
+		}
+
+		unaryInterceptors = append(unaryInterceptors,
+			grpc_zap.PayloadUnaryServerInterceptor(log.Desugar(), decider),
+		)
+		streamInterceptors = append(streamInterceptors,
+			grpc_zap.PayloadStreamServerInterceptor(log.Desugar(), decider),
+		)
+	}
+
 	grpcServer := grpc.NewServer(
-		grpc.StreamInterceptor(grpc_prometheus.StreamServerInterceptor),
-		grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor),
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			streamInterceptors...,
+		)),
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			unaryInterceptors...,
+		)),
 	)
+
 	reflection.Register(grpcServer)
 	grpc_prometheus.Register(grpcServer)
 
