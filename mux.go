@@ -8,7 +8,6 @@ import (
 
 	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
-	"github.com/bottlepay/lnmux/persistence"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/chaincfg"
 	sphinx "github.com/lightningnetwork/lightning-onion"
@@ -23,9 +22,8 @@ import (
 )
 
 type Mux struct {
-	registry  *InvoiceRegistry
-	sphinx    *hop.OnionProcessor
-	persister *persistence.PostgresPersister
+	registry *InvoiceRegistry
+	sphinx   *hop.OnionProcessor
 
 	lnd    []lnd.LndClient
 	logger *zap.SugaredLogger
@@ -36,7 +34,6 @@ type Mux struct {
 type MuxConfig struct {
 	KeyRing         keychain.SecretKeyRing
 	ActiveNetParams *chaincfg.Params
-	Persister       *persistence.PostgresPersister
 	SettledHandler  *SettledHandler
 
 	Lnd      []lnd.LndClient
@@ -70,7 +67,6 @@ func New(cfg *MuxConfig) (*Mux,
 	return &Mux{
 		registry:       cfg.Registry,
 		sphinx:         sphinx,
-		persister:      cfg.Persister,
 		lnd:            cfg.Lnd,
 		logger:         cfg.Logger,
 		settledHandler: cfg.SettledHandler,
