@@ -95,32 +95,42 @@ func unmarshallDbInvoice(invoice *dbInvoice) *Invoice {
 func (p *PostgresPersister) Get(ctx context.Context, hash lntypes.Hash) (*Invoice,
 	map[types.CircuitKey]int64, error) {
 
-	var dbInvoice dbInvoice
-	err := p.conn.ModelContext(ctx, &dbInvoice).
-		Where("hash=?", hash).Select()
-	switch {
-	case err == pg.ErrNoRows:
-		return nil, nil, types.ErrInvoiceNotFound
+	var htlcs = make(map[types.CircuitKey]int64)
 
-	case err != nil:
-		return nil, nil, err
-	}
+	var invoice *Invoice
 
-	var dbHtlcs []*dbHtlc
-	err = p.conn.ModelContext(ctx, &dbHtlcs).
-		Where("hash=?", hash).Select()
+	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		var dbInvoice dbInvoice
+		err := tx.ModelContext(ctx, &dbInvoice).
+			Where("hash=?", hash).Select()
+		switch {
+		case err == pg.ErrNoRows:
+			return types.ErrInvoiceNotFound
+
+		case err != nil:
+			return err
+		}
+
+		var dbHtlcs []*dbHtlc
+		err = tx.ModelContext(ctx, &dbHtlcs).
+			Where("hash=?", hash).Select()
+		if err != nil {
+			return err
+		}
+
+		invoice = unmarshallDbInvoice(&dbInvoice)
+
+		for _, htlc := range dbHtlcs {
+			htlcs[types.CircuitKey{
+				ChanID: htlc.ChanID,
+				HtlcID: htlc.HtlcID,
+			}] = htlc.AmountMsat
+		}
+
+		return nil
+	})
 	if err != nil {
 		return nil, nil, err
-	}
-
-	invoice := unmarshallDbInvoice(&dbInvoice)
-
-	htlcs := make(map[types.CircuitKey]int64)
-	for _, htlc := range dbHtlcs {
-		htlcs[types.CircuitKey{
-			ChanID: htlc.ChanID,
-			HtlcID: htlc.HtlcID,
-		}] = htlc.AmountMsat
 	}
 
 	return invoice, htlcs, nil
