@@ -2,7 +2,6 @@ package persistence
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -63,21 +62,6 @@ type PostgresPersister struct {
 	conn *pg.DB
 
 	logger *zap.SugaredLogger
-}
-
-func (p *PostgresPersister) Delete(ctx context.Context, hash lntypes.Hash) error {
-	result, err := p.conn.ModelContext(ctx, (*dbInvoice)(nil)).
-		Where("hash = ?", hash).Delete() // nolint:contextcheck
-
-	if err != nil {
-		return err
-	}
-
-	if result.RowsAffected() == 0 {
-		return errors.New("invoice not found")
-	}
-
-	return nil
 }
 
 func unmarshallDbInvoice(invoice *dbInvoice) *Invoice {
