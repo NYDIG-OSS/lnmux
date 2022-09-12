@@ -40,6 +40,8 @@ type Config struct {
 	InstrumentationAddress string `yaml:"instrumentationAddress"`
 
 	Logging LoggingConfig `mapstructure:"logging" json:"logging" yaml:"logging"`
+
+	DistributedLock DistributedLockConfig `mapstructure:"distributedLock" json:"distributedLock" yaml:"distributedLock"`
 }
 
 // LoggingConfig contains options related to log outputs.
@@ -118,6 +120,23 @@ type DbConfig struct {
 	// Should be less than server's timeout.
 	// Default is 5 minutes. -1 disables idle timeout check.
 	IdleTimeout time.Duration `yaml:"idleTimeout"`
+}
+
+type DistributedLockConfig struct {
+	// Namespace is the namespace where the lock lives in.
+	Namespace string `mapstructure:"namespace" json:"namespace" yaml:"namespace"`
+
+	// Name is the name of the lock. This should identify the
+	// single-instance service.
+	Name string `mapstructure:"name" json:"name" yaml:"name"`
+
+	// ID is an identifier for this instance. If left empty, a random value
+	// will be generated. If deployed, it is preferred to pass in the pod
+	// name here.
+	ID string `mapstructure:"id" json:"id" yaml:"id"`
+
+	// DevKubeConfig is the path to a local kube config files ($HOME/.kube/config typically). Dev only.
+	DevKubeConfig string `mapstructure:"devKubeConfig" json:"devKubeConfig" yaml:"devKubeConfig"`
 }
 
 func loadConfig(c *cli.Context) (*Config, error) {
