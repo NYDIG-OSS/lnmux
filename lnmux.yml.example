@@ -18,3 +18,9 @@ db:
   # maxConnAge: "15s"
   # poolTimeout: "15s"
   # idleTimeout: "15s"
+logging:
+  # level: "debug"
+  # format: "console"
+  # withCaller: true
+  # grpcLogging: true
+  # grpcPayloadLogging: true
