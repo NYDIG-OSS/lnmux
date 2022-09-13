@@ -15,8 +15,9 @@ const (
 	DefaultListenAddress          = "localhost:19090"
 	DefaultInstrumentationAddress = "localhost:2112"
 
-	PostgresDSNEnvKey = "LNMUX_PERSISTENCE_POSTGRES_DSN"
-	IdentityKeyEnvKey = "LNMUX_IDENTITY_KEY"
+	PostgresDSNEnvKey       = "LNMUX_PERSISTENCE_POSTGRES_DSN"
+	IdentityKeyEnvKey       = "LNMUX_IDENTITY_KEY"
+	DistributedLockIDEnvKey = "LNMUX_DISTRIBUTEDLOCK_ID"
 )
 
 type Config struct {
@@ -41,7 +42,7 @@ type Config struct {
 
 	Logging LoggingConfig `yaml:"logging"`
 
-	DistributedLock DistributedLockConfig `mapstructure:"distributedLock" json:"distributedLock" yaml:"distributedLock"`
+	DistributedLock DistributedLockConfig `yaml:"distributedLock"`
 }
 
 // LoggingConfig contains options related to log outputs.
@@ -175,12 +176,14 @@ func loadConfig(c *cli.Context) (*Config, error) {
 	// Check if the user provides an environment variable for the identity key and load it
 	loadStringEnvVariable(IdentityKeyEnvKey, &cfg.IdentityKey)
 
+	// Check if the user provides an environment variable for the k8s distributed lock ID and load it
+	loadStringEnvVariable(DistributedLockIDEnvKey, &cfg.DistributedLock.ID)
+
 	return &cfg, nil
 }
 
 func loadStringEnvVariable(key string, value *string) {
 	if val, ok := os.LookupEnv(key); ok {
-		log.Infof("Environment variable found: %q", key)
 		*value = val
 	}
 }
