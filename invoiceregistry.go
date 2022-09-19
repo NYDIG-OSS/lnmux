@@ -489,8 +489,8 @@ func (i *InvoiceRegistry) failInvoice(hash lntypes.Hash) error {
 	// Retrieve invoice.
 	set, ok := i.sets.get(hash)
 	if !ok {
-		logger.Debugw("Invoice to fail no longer open/accepted")
-
+		// Invoice has already been settled or cancelled
+		// We don't log here because it is a lazy clean-up.
 		return nil
 	}
 
