@@ -54,7 +54,7 @@ type Config struct {
 	Logger *zap.SugaredLogger
 }
 
-func NewLndClient(cfg Config) (LndClient, error) {
+func NewLndClient(ctx context.Context, cfg Config) (LndClient, error) {
 	logger := cfg.Logger.With("node", cfg.PubKey.String())
 
 	// load grpc connection with config properties
@@ -74,7 +74,7 @@ func NewLndClient(cfg Config) (LndClient, error) {
 	}
 
 	// Test the lnd connection if it is available.
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 	getInfoResp, err := client.lnClient.GetInfo(ctx, &lnrpc.GetInfoRequest{})
 	if err != nil {

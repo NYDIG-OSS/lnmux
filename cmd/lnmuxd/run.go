@@ -68,20 +68,20 @@ func runAction(c *cli.Context) error {
 
 func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
 	// Get the K8s lock
-	releaseLock, err := initDistributedLock(&cfg.DistributedLock)
+	releaseLock, err := initDistributedLock(ctx, &cfg.DistributedLock)
 	if err != nil {
 		return err
 	}
 	defer releaseLock()
 
 	// Setup persistence.
-	db, err := initPersistence(cfg)
+	db, err := initPersistence(ctx, cfg)
 	if err != nil {
 		return err
 	}
 
 	// Parse lnd connection info from the configuration.
-	lnds, activeNetParams, err := initLndClients(&cfg.Lnd)
+	lnds, activeNetParams, err := initLndClients(ctx, &cfg.Lnd)
 	if err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
 			grpc_zap.UnaryServerInterceptor(log.Desugar()),
 		)
 		streamInterceptors = append(streamInterceptors,
-			grpc_zap.StreamServerInterceptor(log.Desugar()),
+			grpc_zap.StreamServerInterceptor(log.Desugar()), //nolint: contextcheck
 		)
 	}
 
@@ -182,7 +182,7 @@ func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
 			grpc_zap.PayloadUnaryServerInterceptor(log.Desugar(), decider),
 		)
 		streamInterceptors = append(streamInterceptors,
-			grpc_zap.PayloadStreamServerInterceptor(log.Desugar(), decider),
+			grpc_zap.PayloadStreamServerInterceptor(log.Desugar(), decider), //nolint: contextcheck
 		)
 	}
 
@@ -283,7 +283,7 @@ func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
 	return nil
 }
 
-func initLndClients(cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
+func initLndClients(ctx context.Context, cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
 	var (
 		nodes []lnd.LndClient
 	)
@@ -300,7 +300,7 @@ func initLndClients(cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
 			return nil, nil, fmt.Errorf("cannot parse pubkey %v: %v", node.PubKey, err)
 		}
 
-		lnd, err := lnd.NewLndClient(lnd.Config{
+		lnd, err := lnd.NewLndClient(ctx, lnd.Config{
 			TlsCertPath:  node.TlsCertPath,
 			MacaroonPath: node.MacaroonPath,
 			LndUrl:       node.LndUrl,
@@ -340,7 +340,7 @@ func network(network string) (*chaincfg.Params, error) {
 	return nil, fmt.Errorf("unsupported network %v", network)
 }
 
-func initPersistence(cfg *Config) (*persistence.PostgresPersister, error) {
+func initPersistence(ctx context.Context, cfg *Config) (*persistence.PostgresPersister, error) {
 	options, err := pg.ParseURL(cfg.DB.DSN)
 	if err != nil {
 		return nil, err
@@ -354,8 +354,8 @@ func initPersistence(cfg *Config) (*persistence.PostgresPersister, error) {
 	options.IdleTimeout = cfg.DB.IdleTimeout
 
 	// Setup persistence
-	db := persistence.NewPostgresPersisterFromOptions(options, log)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	db := persistence.NewPostgresPersisterFromOptions(options, log) //nolint: contextcheck
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
 
 	// Ensure we can reach the server
@@ -366,7 +366,7 @@ func initPersistence(cfg *Config) (*persistence.PostgresPersister, error) {
 	return db, nil
 }
 
-func initDistributedLock(cfg *DistributedLockConfig) (func(), error) {
+func initDistributedLock(ctx context.Context, cfg *DistributedLockConfig) (func(), error) {
 	// Do nothing if no lock name is specified.
 	if cfg.Name == "" {
 		log.Infow("Not using leader election")
@@ -374,7 +374,7 @@ func initDistributedLock(cfg *DistributedLockConfig) (func(), error) {
 		return func() {}, nil
 	}
 
-	return dlock.New(&dlock.LockConfig{
+	return dlock.New(ctx, &dlock.LockConfig{
 		Namespace:     cfg.Namespace,
 		Name:          cfg.Name,
 		ID:            cfg.ID,
