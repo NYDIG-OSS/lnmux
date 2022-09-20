@@ -48,6 +48,26 @@ func runAction(c *cli.Context) error {
 		return err
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	group, ctx := errgroup.WithContext(ctx)
+
+	err = run(ctx, cfg, group)
+	if err != nil {
+		cancel()
+
+		// We don't need to catch the error since we only want to wait all goroutines to finish
+		_ = group.Wait()
+
+		return err
+	}
+
+	return group.Wait()
+}
+
+func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
+	// Get the K8s lock
 	releaseLock, err := initDistributedLock(&cfg.DistributedLock)
 	if err != nil {
 		return err
@@ -197,8 +217,6 @@ func runAction(c *cli.Context) error {
 	// Initialise instrumentation server
 	instServer := initInstrumentationServer(cfg.InstrumentationAddress)
 
-	group, ctx := errgroup.WithContext(context.Background())
-
 	// Run multiplexer.
 	group.Go(func() error {
 		err := mux.Run(ctx)
@@ -262,7 +280,7 @@ func runAction(c *cli.Context) error {
 		}
 	})
 
-	return group.Wait()
+	return nil
 }
 
 func initLndClients(cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
