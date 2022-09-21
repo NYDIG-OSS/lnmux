@@ -67,6 +67,41 @@ func runAction(c *cli.Context) error {
 }
 
 func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
+	// Run ctrl-c handler.
+	group.Go(func() error {
+		log.Infof("Press ctrl-c to exit")
+
+		sigint := make(chan os.Signal, 1)
+		signal.Notify(sigint, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+		select {
+		case <-sigint:
+			return errors.New("user requested termination")
+
+		case <-ctx.Done():
+			return nil
+		}
+	})
+
+	// Initialise instrumentation server
+	instServer := initInstrumentationServer(cfg.InstrumentationAddress)
+
+	group.Go(func() error {
+		log.Infow("Instrumentation HTTP server starting",
+			"instrumentationAddress", instServer.Addr)
+
+		return instServer.ListenAndServe()
+	})
+
+	group.Go(func() error {
+		<-ctx.Done()
+
+		// Stop instrumentation server
+		log.Infow("Instrumentation server stopping")
+
+		return instServer.Close()
+	})
+
 	// Get the K8s lock
 	releaseLock, err := initDistributedLock(ctx, &cfg.DistributedLock)
 	if err != nil {
@@ -214,9 +249,6 @@ func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
 		return err
 	}
 
-	// Initialise instrumentation server
-	instServer := initInstrumentationServer(cfg.InstrumentationAddress)
-
 	// Run multiplexer.
 	group.Go(func() error {
 		err := mux.Run(ctx)
@@ -246,38 +278,6 @@ func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
 		grpcServer.Stop()
 
 		return nil
-	})
-
-	group.Go(func() error {
-		log.Infow("Instrumentation HTTP server starting",
-			"instrumentationAddress", instServer.Addr)
-
-		return instServer.ListenAndServe()
-	})
-
-	group.Go(func() error {
-		<-ctx.Done()
-
-		// Stop instrumentation server
-		log.Infow("Instrumentation server stopping")
-
-		return instServer.Close()
-	})
-
-	// Run ctrl-c handler.
-	group.Go(func() error {
-		log.Infof("Press ctrl-c to exit")
-
-		sigint := make(chan os.Signal, 1)
-		signal.Notify(sigint, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-
-		select {
-		case <-sigint:
-			return errors.New("user requested termination")
-
-		case <-ctx.Done():
-			return nil
-		}
 	})
 
 	return nil

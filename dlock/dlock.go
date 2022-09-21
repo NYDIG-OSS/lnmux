@@ -151,6 +151,8 @@ func New(ctx context.Context, cfg *LockConfig) (func(), error) {
 		return unlock, nil
 
 	case <-ctx.Done():
+		wg.Wait()
+
 		return nil, ctx.Err()
 	}
 
