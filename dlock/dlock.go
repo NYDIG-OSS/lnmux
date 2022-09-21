@@ -78,7 +78,6 @@ func New(ctx context.Context, cfg *LockConfig) (func(), error) {
 
 	lockAcquired := make(chan struct{})
 	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -151,6 +150,8 @@ func New(ctx context.Context, cfg *LockConfig) (func(), error) {
 		return unlock, nil
 
 	case <-ctx.Done():
+		cancel()
+
 		wg.Wait()
 
 		return nil, ctx.Err()
