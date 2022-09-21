@@ -27,7 +27,7 @@ type LockConfig struct {
 	Logger *zap.SugaredLogger
 }
 
-func New(cfg *LockConfig) (func(), error) {
+func New(ctx context.Context, cfg *LockConfig) (func(), error) {
 	var (
 		kubeConfig *rest.Config
 		id         = cfg.ID
@@ -77,7 +77,8 @@ func New(cfg *LockConfig) (func(), error) {
 	}
 
 	lockAcquired := make(chan struct{})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -132,20 +133,27 @@ func New(cfg *LockConfig) (func(), error) {
 		})
 	}()
 
-	<-lockAcquired
+	select {
+	case <-lockAcquired:
+		logger.Debugw("Lock acquired")
 
-	logger.Debugw("Lock acquired")
+		unlock := func() {
+			cancel()
 
-	unlock := func() {
-		cancel()
+			// Wait for `leaderelection.RunOrDie` to terminate. Otherwise
+			// the main thread my already terminate the process before the
+			// lock is released.
+			wg.Wait()
 
-		// Wait for `leaderelection.RunOrDie` to terminate. Otherwise
-		// the main thread my already terminate the process before the
-		// lock is released.
+			logger.Infow("Lock released")
+		}
+
+		return unlock, nil
+
+	case <-ctx.Done():
 		wg.Wait()
 
-		logger.Infow("Lock released")
+		return nil, ctx.Err()
 	}
 
-	return unlock, nil
 }

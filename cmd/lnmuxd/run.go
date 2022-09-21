@@ -48,20 +48,75 @@ func runAction(c *cli.Context) error {
 		return err
 	}
 
-	releaseLock, err := initDistributedLock(&cfg.DistributedLock)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	group, ctx := errgroup.WithContext(ctx)
+
+	err = run(ctx, cfg, group)
+	if err != nil {
+		cancel()
+
+		// We don't need to catch the error since we only want to wait all goroutines to finish
+		_ = group.Wait()
+
+		return err
+	}
+
+	return group.Wait()
+}
+
+func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
+	// Run ctrl-c handler.
+	group.Go(func() error {
+		log.Infof("Press ctrl-c to exit")
+
+		sigint := make(chan os.Signal, 1)
+		signal.Notify(sigint, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+		select {
+		case <-sigint:
+			return errors.New("user requested termination")
+
+		case <-ctx.Done():
+			return nil
+		}
+	})
+
+	// Initialise instrumentation server
+	instServer := initInstrumentationServer(cfg.InstrumentationAddress)
+
+	group.Go(func() error {
+		log.Infow("Instrumentation HTTP server starting",
+			"instrumentationAddress", instServer.Addr)
+
+		return instServer.ListenAndServe()
+	})
+
+	group.Go(func() error {
+		<-ctx.Done()
+
+		// Stop instrumentation server
+		log.Infow("Instrumentation server stopping")
+
+		return instServer.Close()
+	})
+
+	// Get the K8s lock
+	releaseLock, err := initDistributedLock(ctx, &cfg.DistributedLock)
 	if err != nil {
 		return err
 	}
 	defer releaseLock()
 
 	// Setup persistence.
-	db, err := initPersistence(cfg)
+	db, err := initPersistence(ctx, cfg)
 	if err != nil {
 		return err
 	}
 
 	// Parse lnd connection info from the configuration.
-	lnds, activeNetParams, err := initLndClients(&cfg.Lnd)
+	lnds, activeNetParams, err := initLndClients(ctx, &cfg.Lnd)
 	if err != nil {
 		return err
 	}
@@ -146,7 +201,7 @@ func runAction(c *cli.Context) error {
 			grpc_zap.UnaryServerInterceptor(log.Desugar()),
 		)
 		streamInterceptors = append(streamInterceptors,
-			grpc_zap.StreamServerInterceptor(log.Desugar()),
+			grpc_zap.StreamServerInterceptor(log.Desugar()), //nolint: contextcheck
 		)
 	}
 
@@ -162,7 +217,7 @@ func runAction(c *cli.Context) error {
 			grpc_zap.PayloadUnaryServerInterceptor(log.Desugar(), decider),
 		)
 		streamInterceptors = append(streamInterceptors,
-			grpc_zap.PayloadStreamServerInterceptor(log.Desugar(), decider),
+			grpc_zap.PayloadStreamServerInterceptor(log.Desugar(), decider), //nolint: contextcheck
 		)
 	}
 
@@ -193,44 +248,6 @@ func runAction(c *cli.Context) error {
 	if err != nil {
 		return err
 	}
-
-	instAddress := cfg.InstrumentationAddress
-	if instAddress == "" {
-		instAddress = DefaultInstrumentationAddress
-	}
-
-	// Instantiate a new HTTP server and mux.
-	instMux := http.NewServeMux()
-
-	// Register the Prometheus handler.
-	instMux.Handle("/metrics", promhttp.Handler())
-
-	// Register the pprof handlers. We do this manually because we aren't
-	// using the default mux.
-	// See issues https://github.com/golang/go/issues/42834 and
-	// https://github.com/golang/go/issues/22085
-	instMux.HandleFunc("/debug/pprof", pprof.Index)
-	instMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	instMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	instMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	instMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	instMux.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
-	instMux.Handle("/debug/pprof/block", pprof.Handler("block"))
-	instMux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
-	instMux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
-	instMux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
-	instMux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
-
-	instServer := &http.Server{
-		Addr:    instAddress,
-		Handler: instMux,
-
-		// Even though this server should only be exposed to trusted
-		// clients, this mitigates slowloris-like DoS attacks.
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
-	group, ctx := errgroup.WithContext(context.Background())
 
 	// Run multiplexer.
 	group.Go(func() error {
@@ -263,42 +280,10 @@ func runAction(c *cli.Context) error {
 		return nil
 	})
 
-	group.Go(func() error {
-		log.Infow("Instrumentation HTTP server starting",
-			"instrumentationAddress", instAddress)
-
-		return instServer.ListenAndServe()
-	})
-
-	group.Go(func() error {
-		<-ctx.Done()
-
-		// Stop instrumentation server
-		log.Infow("Instrumentation server stopping")
-
-		return instServer.Close()
-	})
-
-	// Run ctrl-c handler.
-	group.Go(func() error {
-		log.Infof("Press ctrl-c to exit")
-
-		sigint := make(chan os.Signal, 1)
-		signal.Notify(sigint, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-
-		select {
-		case <-sigint:
-			return errors.New("user requested termination")
-
-		case <-ctx.Done():
-			return nil
-		}
-	})
-
-	return group.Wait()
+	return nil
 }
 
-func initLndClients(cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
+func initLndClients(ctx context.Context, cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
 	var (
 		nodes []lnd.LndClient
 	)
@@ -315,7 +300,7 @@ func initLndClients(cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
 			return nil, nil, fmt.Errorf("cannot parse pubkey %v: %v", node.PubKey, err)
 		}
 
-		lnd, err := lnd.NewLndClient(lnd.Config{
+		lnd, err := lnd.NewLndClient(ctx, lnd.Config{
 			TlsCertPath:  node.TlsCertPath,
 			MacaroonPath: node.MacaroonPath,
 			LndUrl:       node.LndUrl,
@@ -355,7 +340,7 @@ func network(network string) (*chaincfg.Params, error) {
 	return nil, fmt.Errorf("unsupported network %v", network)
 }
 
-func initPersistence(cfg *Config) (*persistence.PostgresPersister, error) {
+func initPersistence(ctx context.Context, cfg *Config) (*persistence.PostgresPersister, error) {
 	options, err := pg.ParseURL(cfg.DB.DSN)
 	if err != nil {
 		return nil, err
@@ -369,8 +354,8 @@ func initPersistence(cfg *Config) (*persistence.PostgresPersister, error) {
 	options.IdleTimeout = cfg.DB.IdleTimeout
 
 	// Setup persistence
-	db := persistence.NewPostgresPersisterFromOptions(options, log)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	db := persistence.NewPostgresPersisterFromOptions(options, log) //nolint: contextcheck
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
 
 	// Ensure we can reach the server
@@ -381,7 +366,7 @@ func initPersistence(cfg *Config) (*persistence.PostgresPersister, error) {
 	return db, nil
 }
 
-func initDistributedLock(cfg *DistributedLockConfig) (func(), error) {
+func initDistributedLock(ctx context.Context, cfg *DistributedLockConfig) (func(), error) {
 	// Do nothing if no lock name is specified.
 	if cfg.Name == "" {
 		log.Infow("Not using leader election")
@@ -389,11 +374,48 @@ func initDistributedLock(cfg *DistributedLockConfig) (func(), error) {
 		return func() {}, nil
 	}
 
-	return dlock.New(&dlock.LockConfig{
+	return dlock.New(ctx, &dlock.LockConfig{
 		Namespace:     cfg.Namespace,
 		Name:          cfg.Name,
 		ID:            cfg.ID,
 		DevKubeConfig: cfg.DevKubeConfig,
 		Logger:        log,
 	})
+}
+
+func initInstrumentationServer(instAddress string) *http.Server {
+	if instAddress == "" {
+		instAddress = DefaultInstrumentationAddress
+	}
+
+	// Instantiate a new HTTP server and mux.
+	instMux := http.NewServeMux()
+
+	// Register the Prometheus handler.
+	instMux.Handle("/metrics", promhttp.Handler())
+
+	// Register the pprof handlers. We do this manually because we aren't
+	// using the default mux.
+	// See issues https://github.com/golang/go/issues/42834 and
+	// https://github.com/golang/go/issues/22085
+	instMux.HandleFunc("/debug/pprof", pprof.Index)
+	instMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	instMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	instMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	instMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	instMux.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+	instMux.Handle("/debug/pprof/block", pprof.Handler("block"))
+	instMux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	instMux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	instMux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+	instMux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+
+	return &http.Server{
+		Addr:    instAddress,
+		Handler: instMux,
+
+		// Even though this server should only be exposed to trusted
+		// clients, this mitigates slowloris-like DoS attacks.
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 }
