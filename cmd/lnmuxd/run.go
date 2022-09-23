@@ -280,7 +280,7 @@ func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
 		return nil
 	})
 
-	return nil
+	return group.Wait()
 }
 
 func initLndClients(ctx context.Context, cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
