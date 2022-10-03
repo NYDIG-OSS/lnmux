@@ -48,26 +48,14 @@ func runAction(c *cli.Context) error {
 		return err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	group, ctx := errgroup.WithContext(ctx)
-
-	err = run(ctx, cfg, group)
-	if err != nil {
-		cancel()
-
-		// We don't need to catch the error since we only want to wait all goroutines to finish
-		_ = group.Wait()
-
-		return err
-	}
-
-	return group.Wait()
+	return initServiceWithLock(cfg.InstrumentationAddress, cfg.DistributedLock, func(ctx context.Context) error {
+		return run(ctx, cfg)
+	})
 }
 
-func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
-	// Run ctrl-c handler.
+func initServiceWithLock(address string, lockConfig DistributedLockConfig, run func(context.Context) error) error {
+	group, ctx := errgroup.WithContext(context.Background())
+
 	group.Go(func() error {
 		log.Infof("Press ctrl-c to exit")
 
@@ -83,8 +71,7 @@ func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
 		}
 	})
 
-	// Initialise instrumentation server
-	instServer := initInstrumentationServer(cfg.InstrumentationAddress)
+	instServer := initInstrumentationServer(address)
 
 	group.Go(func() error {
 		log.Infow("Instrumentation HTTP server starting",
@@ -102,13 +89,20 @@ func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
 		return instServer.Close()
 	})
 
-	// Get the K8s lock
-	releaseLock, err := initDistributedLock(ctx, &cfg.DistributedLock)
-	if err != nil {
-		return err
-	}
-	defer releaseLock()
+	group.Go(func() error {
+		releaseLock, err := initDistributedLock(ctx, &lockConfig)
+		if err != nil {
+			return err
+		}
+		defer releaseLock()
 
+		return run(ctx)
+	})
+
+	return group.Wait()
+}
+
+func run(ctx context.Context, cfg *Config) error {
 	// Setup persistence.
 	db, err := initPersistence(ctx, cfg)
 	if err != nil {
@@ -249,6 +243,8 @@ func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
 		return err
 	}
 
+	group, ctx := errgroup.WithContext(ctx)
+
 	// Run multiplexer.
 	group.Go(func() error {
 		err := mux.Run(ctx)
@@ -280,7 +276,7 @@ func run(ctx context.Context, cfg *Config, group *errgroup.Group) error {
 		return nil
 	})
 
-	return nil
+	return group.Wait()
 }
 
 func initLndClients(ctx context.Context, cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
