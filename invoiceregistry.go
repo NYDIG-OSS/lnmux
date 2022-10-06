@@ -170,9 +170,6 @@ func (i *InvoiceRegistry) SubscribeAccept(callback AcceptCallback) (
 	func(), error) {
 
 	subscriberId := i.subscriptionManager.generateSubscriptionId()
-	logger := i.logger.With("id", subscriberId)
-
-	logger.Debugw("Adding subscriber")
 
 	select {
 	case i.newInvoiceAcceptSubscription <- invoiceAcceptSubscription{
@@ -185,8 +182,6 @@ func (i *InvoiceRegistry) SubscribeAccept(callback AcceptCallback) (
 	}
 
 	return func() {
-		logger.Debugw("Removing subscriber")
-
 		select {
 		case i.cancelInvoiceAcceptSubscription <- subscriberId:
 		case <-i.quit:
