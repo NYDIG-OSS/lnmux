@@ -73,6 +73,10 @@ type RegistryConfig struct {
 	PrivKey [32]byte
 
 	AutoSettle bool
+
+	// GracePeriodWithoutSubscribers is the default period during which the subscriberManager is waiting for a subscriber
+	// to reconnect.
+	GracePeriodWithoutSubscribers time.Duration
 }
 
 type InvoiceCallback func(update InvoiceUpdate)
@@ -135,7 +139,7 @@ func NewRegistry(cdb *persistence.PostgresPersister,
 		htlcChan:                        make(chan *registryHtlc),
 		newInvoiceAcceptSubscription:    make(chan invoiceAcceptSubscription),
 		cancelInvoiceAcceptSubscription: make(chan int),
-		subscriptionManager:             newSubscriptionManager(cfg.Logger),
+		subscriptionManager:             newSubscriptionManager(cfg.Logger, cfg.GracePeriodWithoutSubscribers),
 		requestSettleChan:               make(chan *invoiceRequest),
 		cancelChan:                      make(chan *invoiceRequest),
 		quit:                            make(chan struct{}),
@@ -751,12 +755,14 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 		// Don't start a new set if there is currently no application listening
 		// for accept events. This is to prevent htlcs being held on to until
 		// the mpp timeout when no one is listening.
+		// If the last disconnection occurred recently, then keep accepting HTLCs
+		// in the hope that a subscriber will reconnect.
 		//
 		// When we are adding to an existing set, we keep going and assume that
 		// the application will be back online soon.
 		//
 		// This restriction does not apply in auto-settle mode.
-		if !i.cfg.AutoSettle && !i.subscriptionManager.hasSubscribers() {
+		if !i.cfg.AutoSettle && !i.subscriptionManager.hasRecentSubscribers() {
 			h.resolve(NewFailResolution(
 				ResultNoAcceptSubscriber,
 			))

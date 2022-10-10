@@ -151,13 +151,14 @@ func run(ctx context.Context, cfg *Config) error {
 	registry := lnmux.NewRegistry(
 		db,
 		&lnmux.RegistryConfig{
-			Clock:                clock.NewDefaultClock(),
-			FinalCltvRejectDelta: 10,
-			HtlcHoldDuration:     30 * time.Second,
-			AcceptTimeout:        60 * time.Second,
-			Logger:               log,
-			PrivKey:              identityKey,
-			AutoSettle:           cfg.AutoSettle,
+			Clock:                         clock.NewDefaultClock(),
+			FinalCltvRejectDelta:          10,
+			HtlcHoldDuration:              30 * time.Second,
+			AcceptTimeout:                 60 * time.Second,
+			Logger:                        log,
+			PrivKey:                       identityKey,
+			AutoSettle:                    cfg.AutoSettle,
+			GracePeriodWithoutSubscribers: lnmux.DefaultGracePeriodWithoutSubscribers,
 		},
 	)
 
