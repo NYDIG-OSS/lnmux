@@ -64,6 +64,14 @@ func optAcceptTimeout(d time.Duration) regTestContextOption {
 	}
 }
 
+// optGracePeriodWithoutSubscribers returns a functional argument to newRegistryTestContext()
+// that modifies the gracePeriodWithoutSubscribers configuration in the RegistryConfig.
+func optGracePeriodWithoutSubscribers(d time.Duration) regTestContextOption {
+	return func(c *registryTestContext) {
+		c.cfg.GracePeriodWithoutSubscribers = d
+	}
+}
+
 // optTestAmt returns a functional argument to newRegistryTestContext()
 // that modifies the testAmt configuration.
 func optTestAmt(amt int64) regTestContextOption { // nolint:unused
@@ -304,19 +312,41 @@ func TestAutoSettle(t *testing.T) {
 	cancelAcceptUpdates()
 }
 
-// TestNoSubscriberFail asserts that no new set is started when there's no
-// application subscribed to accept events.
-func TestNoSubscriberFail(t *testing.T) {
+// TestHasRecentSubscriber asserts that a new set is started when there was
+// a recent subscriber.
+// After the grace period, we should not accept any new sets.
+func TestHasRecentSubscriber(t *testing.T) {
 	defer test.Timeout()()
 	t.Parallel()
 
-	c := newRegistryTestContext(t)
+	c := newRegistryTestContext(t,
+		optAcceptTimeout(200*time.Millisecond),
+		optGracePeriodWithoutSubscribers(200*time.Millisecond),
+	)
 
-	// Add invoice.
+	// There has never been a subscriber, don't accept any new set
 	invoice, preimage := c.createInvoice(1, time.Hour)
 
 	c.notifyHtlc(preimage.Hash(), invoice.PaymentAddr)
 
+	c.checkHtlcFailed(ResultNoAcceptSubscriber)
+
+	// A subscriber connects and disconnects
+	_, acceptCancel := c.subscribeAccept()
+	acceptCancel()
+
+	// Now check that we accept new set_id if there was a recent subscriber
+	c.notifyHtlc(preimage.Hash(), invoice.PaymentAddr)
+
+	// The set was accepted but we reach accept timeout
+	c.checkHtlcFailed(ResultAcceptTimeout)
+
+	// Add invoice.
+	invoice, preimage = c.createInvoice(1, time.Hour)
+
+	c.notifyHtlc(preimage.Hash(), invoice.PaymentAddr)
+
+	// The grace period is finished, we don't accept new sets
 	c.checkHtlcFailed(ResultNoAcceptSubscriber)
 }
 
