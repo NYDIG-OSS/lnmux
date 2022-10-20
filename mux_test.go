@@ -197,7 +197,9 @@ func TestMux(t *testing.T) {
 	dest, err := route.NewVertexFromBytes(keyRing.pubKey.SerializeCompressed())
 	require.NoError(t, err)
 
-	genOnion := func() []byte {
+	receiveHtlcInOut := func(sourceNodeIdx int, htlcID uint64,
+		incomingAmt, outgoingAmt uint64) {
+
 		route := &route.Route{
 			Hops: []*route.Hop{
 				{
@@ -214,14 +216,6 @@ func TestMux(t *testing.T) {
 
 		onionBlob, err := generateSphinxPacket(route, testHash[:], sessionKey)
 		require.NoError(t, err)
-
-		return onionBlob
-	}
-
-	onionBlob := genOnion()
-
-	receiveHtlcInOut := func(sourceNodeIdx int, htlcID uint64,
-		incomingAmt, outgoingAmt uint64) {
 
 		virtualChannel := virtualChannelFromNode(
 			l[sourceNodeIdx].client.PubKey(),
@@ -342,9 +336,6 @@ func TestMux(t *testing.T) {
 	require.NotNil(t, invoice)
 
 	testHash = testPreimage.Hash()
-
-	// Regenerate onion blob for new hash.
-	onionBlob = genOnion()
 
 	receiveHtlc(0, 20, 15000)
 
