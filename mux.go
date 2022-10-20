@@ -262,6 +262,21 @@ func (p *Mux) ProcessHtlc(
 		return fail(failCode)
 	}
 
+	failLocal := func(failureMessage lnwire.FailureMessage) error {
+		reason, err := obfuscator.EncryptFirstHop(failureMessage)
+		if err != nil {
+			return err
+		}
+
+		// Here we need more control over htlc
+		// interception so that we can send back an
+		// encrypted failure message to the sender.
+		return htlc.reply(&interceptedHtlcResponse{
+			action:         routerrpc.ResolveHoldForwardAction_FAIL,
+			failureMessage: reason,
+		})
+	}
+
 	resolve := func(resolution HtlcResolution) error {
 		// Determine required action for the resolution based on the type of
 		// resolution we have received.
@@ -289,18 +304,7 @@ func (p *Mux) ProcessHtlc(
 				)
 			}
 
-			reason, err := obfuscator.EncryptFirstHop(failureMessage)
-			if err != nil {
-				return err
-			}
-
-			// Here we need more control over htlc
-			// interception so that we can send back an
-			// encrypted failure message to the sender.
-			return htlc.reply(&interceptedHtlcResponse{
-				action:         routerrpc.ResolveHoldForwardAction_FAIL,
-				failureMessage: reason,
-			})
+			return failLocal(failureMessage)
 
 		// Fail if we do not get a settle of fail resolution, since we
 		// are only expecting to handle settles and fails.
