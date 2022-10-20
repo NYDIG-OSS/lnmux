@@ -220,8 +220,8 @@ func TestMux(t *testing.T) {
 
 	onionBlob := genOnion()
 
-	receiveHtlc := func(sourceNodeIdx int, htlcID uint64,
-		outgoingAmt uint64) {
+	receiveHtlcInOut := func(sourceNodeIdx int, htlcID uint64,
+		incomingAmt, outgoingAmt uint64) {
 
 		virtualChannel := virtualChannelFromNode(
 			l[sourceNodeIdx].client.PubKey(),
@@ -231,11 +231,18 @@ func TestMux(t *testing.T) {
 			IncomingCircuitKey:      &routerrpc.CircuitKey{HtlcId: htlcID},
 			PaymentHash:             testHash[:],
 			IncomingExpiry:          1050,
+			IncomingAmountMsat:      incomingAmt,
 			OutgoingAmountMsat:      outgoingAmt,
 			OutgoingExpiry:          1040,
 			OnionBlob:               onionBlob[:],
 			OutgoingRequestedChanId: virtualChannel,
 		}
+	}
+
+	receiveHtlc := func(sourceNodeIdx int, htlcID uint64,
+		outgoingAmt uint64) {
+
+		receiveHtlcInOut(sourceNodeIdx, htlcID, outgoingAmt, outgoingAmt)
 	}
 
 	expectResponse := func(resp *routerrpc.ForwardHtlcInterceptResponse,
@@ -246,6 +253,10 @@ func TestMux(t *testing.T) {
 		require.Equal(t, uint64(htlcID), resp.IncomingCircuitKey.HtlcId)
 		require.Equal(t, expectedAction, resp.Action)
 	}
+
+	// Test an htlc with an amount that is not high enough.
+	receiveHtlcInOut(0, 20, 5000, 6000)
+	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	// Notify arrival of part 1.
 	// db.SettleErr = nil

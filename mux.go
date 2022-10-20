@@ -93,6 +93,7 @@ type interceptedHtlc struct {
 	circuitKey         types.CircuitKey
 	hash               lntypes.Hash
 	onionBlob          []byte
+	incomingAmountMsat uint64
 	outgoingAmountMsat uint64
 	expiry             uint32
 	outgoingChanID     uint64
@@ -191,6 +192,12 @@ func marshallFailureCode(code lnwire.FailCode) (
 	case lnwire.CodeInvalidOnionKey:
 		return lnrpc.Failure_INVALID_ONION_KEY, nil
 
+	case lnwire.CodeFeeInsufficient:
+		// Unfortunately lnrpc.Failure_FEE_INSUFFICIENT is not supported by lnd.
+		// Return 0, which is mapped to TemporaryChannelFailure.
+
+		return 0, nil
+
 	default:
 		return 0, fmt.Errorf("unsupported code %v", code)
 	}
@@ -219,6 +226,14 @@ func (p *Mux) ProcessHtlc(
 			action:      routerrpc.ResolveHoldForwardAction_FAIL,
 			failureCode: rpcCode,
 		})
+	}
+
+	// Verify that the amount of the incoming htlc is at least what is forwarded
+	// over the virtual channel.
+	if htlc.incomingAmountMsat < htlc.outgoingAmountMsat {
+		logger.Debugw("Insufficient incoming htlc amount")
+
+		return fail(lnwire.CodeFeeInsufficient)
 	}
 
 	// Try decode final hop onion. Expiry can be set to zero, because the
