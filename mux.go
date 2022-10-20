@@ -93,7 +93,7 @@ type interceptedHtlc struct {
 	circuitKey         types.CircuitKey
 	hash               lntypes.Hash
 	onionBlob          []byte
-	outgoingAmountMsat int64
+	outgoingAmountMsat uint64
 	expiry             uint32
 	outgoingChanID     uint64
 

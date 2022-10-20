@@ -221,7 +221,7 @@ func TestMux(t *testing.T) {
 	onionBlob := genOnion()
 
 	receiveHtlc := func(sourceNodeIdx int, htlcID uint64,
-		outgoingAmt int64) {
+		outgoingAmt uint64) {
 
 		virtualChannel := virtualChannelFromNode(
 			l[sourceNodeIdx].client.PubKey(),
@@ -231,7 +231,7 @@ func TestMux(t *testing.T) {
 			IncomingCircuitKey:      &routerrpc.CircuitKey{HtlcId: htlcID},
 			PaymentHash:             testHash[:],
 			IncomingExpiry:          1050,
-			OutgoingAmountMsat:      uint64(outgoingAmt),
+			OutgoingAmountMsat:      outgoingAmt,
 			OutgoingExpiry:          1040,
 			OnionBlob:               onionBlob[:],
 			OutgoingRequestedChanId: virtualChannel,
