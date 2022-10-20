@@ -89,13 +89,13 @@ func (p *Mux) Run(ctx context.Context) error {
 }
 
 type interceptedHtlc struct {
-	source         common.PubKey
-	circuitKey     types.CircuitKey
-	hash           lntypes.Hash
-	onionBlob      []byte
-	amountMsat     int64
-	expiry         uint32
-	outgoingChanID uint64
+	source             common.PubKey
+	circuitKey         types.CircuitKey
+	hash               lntypes.Hash
+	onionBlob          []byte
+	outgoingAmountMsat int64
+	expiry             uint32
+	outgoingChanID     uint64
 
 	reply func(*interceptedHtlcResponse) error
 }
@@ -270,7 +270,7 @@ func (p *Mux) ProcessHtlc(
 				failureMessage = &lnwire.FailMPPTimeout{}
 			} else {
 				failureMessage = lnwire.NewFailIncorrectDetails(
-					lnwire.MilliSatoshi(htlc.amountMsat), 0,
+					lnwire.MilliSatoshi(htlc.outgoingAmountMsat), 0,
 				)
 			}
 
@@ -299,7 +299,7 @@ func (p *Mux) ProcessHtlc(
 	p.registry.NotifyExitHopHtlc(
 		&registryHtlc{
 			rHash:         htlc.hash,
-			amtPaid:       lnwire.MilliSatoshi(htlc.amountMsat),
+			amtPaid:       lnwire.MilliSatoshi(htlc.outgoingAmountMsat),
 			expiry:        htlc.expiry,
 			currentHeight: int32(height),
 			circuitKey:    htlc.circuitKey,
