@@ -277,6 +277,18 @@ func (p *Mux) ProcessHtlc(
 		})
 	}
 
+	// Verify that the amount going out over the virtual channel matches what
+	// the sender intended.
+	if uint64(payload.ForwardingInfo().AmountToForward) !=
+		htlc.outgoingAmountMsat {
+
+		logger.Debugw("Payload amount mismatch")
+
+		return failLocal(&lnwire.FailFinalIncorrectHtlcAmount{
+			IncomingHTLCAmount: lnwire.MilliSatoshi(htlc.outgoingAmountMsat),
+		})
+	}
+
 	resolve := func(resolution HtlcResolution) error {
 		// Determine required action for the resolution based on the type of
 		// resolution we have received.

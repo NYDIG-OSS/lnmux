@@ -21,6 +21,7 @@ import (
 	"github.com/lightningnetwork/lnd/lnrpc/chainrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
 	"github.com/lightningnetwork/lnd/lntypes"
+	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/lightningnetwork/lnd/record"
 	"github.com/lightningnetwork/lnd/routing/route"
 	"github.com/stretchr/testify/assert"
@@ -198,12 +199,13 @@ func TestMux(t *testing.T) {
 	require.NoError(t, err)
 
 	receiveHtlcInOut := func(sourceNodeIdx int, htlcID uint64,
-		incomingAmt, outgoingAmt uint64) {
+		incomingAmt, outgoingAmt, amtToForward uint64) {
 
 		route := &route.Route{
 			Hops: []*route.Hop{
 				{
-					PubKeyBytes: dest,
+					AmtToForward: lnwire.MilliSatoshi(amtToForward),
+					PubKeyBytes:  dest,
 					MPP: record.NewMPP(
 						invoice.Value, invoice.PaymentAddr,
 					),
@@ -236,7 +238,9 @@ func TestMux(t *testing.T) {
 	receiveHtlc := func(sourceNodeIdx int, htlcID uint64,
 		outgoingAmt uint64) {
 
-		receiveHtlcInOut(sourceNodeIdx, htlcID, outgoingAmt, outgoingAmt)
+		receiveHtlcInOut(
+			sourceNodeIdx, htlcID, outgoingAmt, outgoingAmt, outgoingAmt,
+		)
 	}
 
 	expectResponse := func(resp *routerrpc.ForwardHtlcInterceptResponse,
@@ -249,7 +253,11 @@ func TestMux(t *testing.T) {
 	}
 
 	// Test an htlc with an amount that is not high enough.
-	receiveHtlcInOut(0, 20, 5000, 6000)
+	receiveHtlcInOut(0, 20, 5000, 6000, 6000)
+	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_FAIL)
+
+	// Test an htlc with an amount mismatch in the payload.
+	receiveHtlcInOut(0, 20, 6000, 6000, 5900)
 	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	// Notify arrival of part 1.
