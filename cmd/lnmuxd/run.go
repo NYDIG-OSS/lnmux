@@ -131,6 +131,9 @@ func run(ctx context.Context, cfg *Config) error {
 		"key", key,
 		"network", activeNetParams.Name)
 
+	// Get routing policy.
+	routingPolicy := cfg.GetRoutingPolicy()
+
 	// Get a new creator instance.
 	var gwPubKeys []common.PubKey
 	for _, lnd := range lnds {
@@ -141,6 +144,7 @@ func run(ctx context.Context, cfg *Config) error {
 			KeyRing:         keyRing,
 			GwPubKeys:       gwPubKeys,
 			ActiveNetParams: activeNetParams,
+			RoutingPolicy:   routingPolicy,
 		},
 	)
 	if err != nil {
@@ -177,6 +181,7 @@ func run(ctx context.Context, cfg *Config) error {
 			Logger:          log,
 			Registry:        registry,
 			SettledHandler:  settledHandler,
+			RoutingPolicy:   routingPolicy,
 		})
 	if err != nil {
 		return err

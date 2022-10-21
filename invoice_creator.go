@@ -37,6 +37,9 @@ type InvoiceCreatorConfig struct {
 	KeyRing         keychain.SecretKeyRing
 	GwPubKeys       []common.PubKey
 	ActiveNetParams *chaincfg.Params
+
+	// RoutingPolicy is the policy that is used for the hop hints.
+	RoutingPolicy RoutingPolicy
 }
 
 type InvoiceCreator struct {
@@ -44,6 +47,7 @@ type InvoiceCreator struct {
 	gwPubKeys       []*btcec.PublicKey
 	activeNetParams *chaincfg.Params
 	idKeyDesc       keychain.KeyDescriptor
+	routingPolicy   RoutingPolicy
 }
 
 func NewInvoiceCreator(cfg *InvoiceCreatorConfig) (*InvoiceCreator, error) {
@@ -71,6 +75,7 @@ func NewInvoiceCreator(cfg *InvoiceCreatorConfig) (*InvoiceCreator, error) {
 		activeNetParams: cfg.ActiveNetParams,
 		keyRing:         cfg.KeyRing,
 		idKeyDesc:       idKeyDesc,
+		routingPolicy:   cfg.RoutingPolicy,
 	}, nil
 }
 
@@ -172,10 +177,10 @@ func (c *InvoiceCreator) Create(amtMSat int64, expiry time.Duration,
 
 		hopHint := zpay32.HopHint{
 			NodeID:                    gwPubKey,
-			ChannelID:                 virtualChannel, // Rotate?
-			FeeBaseMSat:               0,
-			FeeProportionalMillionths: 0,
-			CLTVExpiryDelta:           40, // Can be zero?
+			ChannelID:                 virtualChannel,
+			FeeBaseMSat:               uint32(c.routingPolicy.FeeBaseMsat),
+			FeeProportionalMillionths: uint32(c.routingPolicy.FeeRatePpm),
+			CLTVExpiryDelta:           uint16(c.routingPolicy.CltvDelta),
 		}
 
 		options = append(options, zpay32.RouteHint([]zpay32.HopHint{hopHint}))

@@ -118,11 +118,18 @@ func TestMux(t *testing.T) {
 	db, dropDB := setupTestDB(t)
 	defer dropDB()
 
+	routingPolicy := RoutingPolicy{
+		FeeBaseMsat: 1000,
+		FeeRatePpm:  10000,
+		CltvDelta:   10,
+	}
+
 	creator, err := NewInvoiceCreator(
 		&InvoiceCreatorConfig{
 			KeyRing:         keyRing,
 			GwPubKeys:       []common.PubKey{testPubKey1, testPubKey2},
 			ActiveNetParams: activeNetParams,
+			RoutingPolicy:   routingPolicy,
 		},
 	)
 	require.NoError(t, err)
@@ -159,6 +166,7 @@ func TestMux(t *testing.T) {
 		Logger:          logger.Sugar(),
 		Registry:        registry,
 		SettledHandler:  settledHandler,
+		RoutingPolicy:   routingPolicy,
 	})
 	require.NoError(t, err)
 
@@ -199,13 +207,15 @@ func TestMux(t *testing.T) {
 	require.NoError(t, err)
 
 	receiveHtlcInOut := func(sourceNodeIdx int, htlcID uint64,
-		incomingAmt, outgoingAmt, amtToForward uint64) {
+		incomingAmt, outgoingAmt, amtToForward uint64,
+		inExpiry, outExpiry, payloadExpiry uint32) {
 
 		route := &route.Route{
 			Hops: []*route.Hop{
 				{
-					AmtToForward: lnwire.MilliSatoshi(amtToForward),
-					PubKeyBytes:  dest,
+					AmtToForward:     lnwire.MilliSatoshi(amtToForward),
+					OutgoingTimeLock: payloadExpiry,
+					PubKeyBytes:      dest,
 					MPP: record.NewMPP(
 						invoice.Value, invoice.PaymentAddr,
 					),
@@ -226,10 +236,10 @@ func TestMux(t *testing.T) {
 		l[sourceNodeIdx].htlcChan <- &routerrpc.ForwardHtlcInterceptRequest{
 			IncomingCircuitKey:      &routerrpc.CircuitKey{HtlcId: htlcID},
 			PaymentHash:             testHash[:],
-			IncomingExpiry:          1050,
+			IncomingExpiry:          inExpiry,
 			IncomingAmountMsat:      incomingAmt,
 			OutgoingAmountMsat:      outgoingAmt,
-			OutgoingExpiry:          1040,
+			OutgoingExpiry:          outExpiry,
 			OnionBlob:               onionBlob[:],
 			OutgoingRequestedChanId: virtualChannel,
 		}
@@ -238,8 +248,13 @@ func TestMux(t *testing.T) {
 	receiveHtlc := func(sourceNodeIdx int, htlcID uint64,
 		outgoingAmt uint64) {
 
+		// Calculate required routing fee.
+		incomingAmt := outgoingAmt + uint64(routingPolicy.FeeBaseMsat+
+			(routingPolicy.FeeRatePpm*int64(outgoingAmt))/1e6)
+
 		receiveHtlcInOut(
-			sourceNodeIdx, htlcID, outgoingAmt, outgoingAmt, outgoingAmt,
+			sourceNodeIdx, htlcID, incomingAmt, outgoingAmt, outgoingAmt,
+			1050, 1040, 1040,
 		)
 	}
 
@@ -253,11 +268,19 @@ func TestMux(t *testing.T) {
 	}
 
 	// Test an htlc with an amount that is not high enough.
-	receiveHtlcInOut(0, 20, 5000, 6000, 6000)
+	receiveHtlcInOut(0, 20, 6000+1060-1, 6000, 6000, 1050, 1040, 1040)
 	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	// Test an htlc with an amount mismatch in the payload.
-	receiveHtlcInOut(0, 20, 6000, 6000, 5900)
+	receiveHtlcInOut(0, 20, 6000+1060, 6000, 5900, 1050, 1040, 1040)
+	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_FAIL)
+
+	// Test an htlc with a cltv delta that is too small.
+	receiveHtlcInOut(0, 20, 6000+1060, 6000, 6000, 1049, 1040, 1040)
+	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_FAIL)
+
+	// Test an htlc with a cltv delta mismatch in the payload.
+	receiveHtlcInOut(0, 20, 6000+1060, 6000, 6000, 1051, 1041, 1040)
 	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	// Notify arrival of part 1.
