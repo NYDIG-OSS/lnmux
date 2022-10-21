@@ -21,6 +21,7 @@ import (
 	"github.com/lightningnetwork/lnd/lnrpc/chainrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
 	"github.com/lightningnetwork/lnd/lntypes"
+	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/lightningnetwork/lnd/record"
 	"github.com/lightningnetwork/lnd/routing/route"
 	"github.com/stretchr/testify/assert"
@@ -197,11 +198,14 @@ func TestMux(t *testing.T) {
 	dest, err := route.NewVertexFromBytes(keyRing.pubKey.SerializeCompressed())
 	require.NoError(t, err)
 
-	genOnion := func() []byte {
+	receiveHtlcInOut := func(sourceNodeIdx int, htlcID uint64,
+		incomingAmt, outgoingAmt, amtToForward uint64) {
+
 		route := &route.Route{
 			Hops: []*route.Hop{
 				{
-					PubKeyBytes: dest,
+					AmtToForward: lnwire.MilliSatoshi(amtToForward),
+					PubKeyBytes:  dest,
 					MPP: record.NewMPP(
 						invoice.Value, invoice.PaymentAddr,
 					),
@@ -215,14 +219,6 @@ func TestMux(t *testing.T) {
 		onionBlob, err := generateSphinxPacket(route, testHash[:], sessionKey)
 		require.NoError(t, err)
 
-		return onionBlob
-	}
-
-	onionBlob := genOnion()
-
-	receiveHtlc := func(sourceNodeIdx int, htlcID uint64,
-		amt int64) {
-
 		virtualChannel := virtualChannelFromNode(
 			l[sourceNodeIdx].client.PubKey(),
 		)
@@ -231,11 +227,20 @@ func TestMux(t *testing.T) {
 			IncomingCircuitKey:      &routerrpc.CircuitKey{HtlcId: htlcID},
 			PaymentHash:             testHash[:],
 			IncomingExpiry:          1050,
-			OutgoingAmountMsat:      uint64(amt),
+			IncomingAmountMsat:      incomingAmt,
+			OutgoingAmountMsat:      outgoingAmt,
 			OutgoingExpiry:          1040,
 			OnionBlob:               onionBlob[:],
 			OutgoingRequestedChanId: virtualChannel,
 		}
+	}
+
+	receiveHtlc := func(sourceNodeIdx int, htlcID uint64,
+		outgoingAmt uint64) {
+
+		receiveHtlcInOut(
+			sourceNodeIdx, htlcID, outgoingAmt, outgoingAmt, outgoingAmt,
+		)
 	}
 
 	expectResponse := func(resp *routerrpc.ForwardHtlcInterceptResponse,
@@ -246,6 +251,14 @@ func TestMux(t *testing.T) {
 		require.Equal(t, uint64(htlcID), resp.IncomingCircuitKey.HtlcId)
 		require.Equal(t, expectedAction, resp.Action)
 	}
+
+	// Test an htlc with an amount that is not high enough.
+	receiveHtlcInOut(0, 20, 5000, 6000, 6000)
+	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_FAIL)
+
+	// Test an htlc with an amount mismatch in the payload.
+	receiveHtlcInOut(0, 20, 6000, 6000, 5900)
+	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	// Notify arrival of part 1.
 	// db.SettleErr = nil
@@ -331,9 +344,6 @@ func TestMux(t *testing.T) {
 	require.NotNil(t, invoice)
 
 	testHash = testPreimage.Hash()
-
-	// Regenerate onion blob for new hash.
-	onionBlob = genOnion()
 
 	receiveHtlc(0, 20, 15000)
 

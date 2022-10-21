@@ -89,13 +89,14 @@ func (p *Mux) Run(ctx context.Context) error {
 }
 
 type interceptedHtlc struct {
-	source         common.PubKey
-	circuitKey     types.CircuitKey
-	hash           lntypes.Hash
-	onionBlob      []byte
-	amountMsat     int64
-	expiry         uint32
-	outgoingChanID uint64
+	source             common.PubKey
+	circuitKey         types.CircuitKey
+	hash               lntypes.Hash
+	onionBlob          []byte
+	incomingAmountMsat uint64
+	outgoingAmountMsat uint64
+	expiry             uint32
+	outgoingChanID     uint64
 
 	reply func(*interceptedHtlcResponse) error
 }
@@ -191,6 +192,12 @@ func marshallFailureCode(code lnwire.FailCode) (
 	case lnwire.CodeInvalidOnionKey:
 		return lnrpc.Failure_INVALID_ONION_KEY, nil
 
+	case lnwire.CodeFeeInsufficient:
+		// Unfortunately lnrpc.Failure_FEE_INSUFFICIENT is not supported by lnd.
+		// Return 0, which is mapped to TemporaryChannelFailure.
+
+		return 0, nil
+
 	default:
 		return 0, fmt.Errorf("unsupported code %v", code)
 	}
@@ -221,6 +228,14 @@ func (p *Mux) ProcessHtlc(
 		})
 	}
 
+	// Verify that the amount of the incoming htlc is at least what is forwarded
+	// over the virtual channel.
+	if htlc.incomingAmountMsat < htlc.outgoingAmountMsat {
+		logger.Debugw("Insufficient incoming htlc amount")
+
+		return fail(lnwire.CodeFeeInsufficient)
+	}
+
 	// Try decode final hop onion. Expiry can be set to zero, because the
 	// replay log is disabled.
 	onionReader := bytes.NewReader(htlc.onionBlob)
@@ -247,6 +262,33 @@ func (p *Mux) ProcessHtlc(
 		return fail(failCode)
 	}
 
+	failLocal := func(failureMessage lnwire.FailureMessage) error {
+		reason, err := obfuscator.EncryptFirstHop(failureMessage)
+		if err != nil {
+			return err
+		}
+
+		// Here we need more control over htlc
+		// interception so that we can send back an
+		// encrypted failure message to the sender.
+		return htlc.reply(&interceptedHtlcResponse{
+			action:         routerrpc.ResolveHoldForwardAction_FAIL,
+			failureMessage: reason,
+		})
+	}
+
+	// Verify that the amount going out over the virtual channel matches what
+	// the sender intended.
+	if uint64(payload.ForwardingInfo().AmountToForward) !=
+		htlc.outgoingAmountMsat {
+
+		logger.Debugw("Payload amount mismatch")
+
+		return failLocal(&lnwire.FailFinalIncorrectHtlcAmount{
+			IncomingHTLCAmount: lnwire.MilliSatoshi(htlc.outgoingAmountMsat),
+		})
+	}
+
 	resolve := func(resolution HtlcResolution) error {
 		// Determine required action for the resolution based on the type of
 		// resolution we have received.
@@ -270,22 +312,11 @@ func (p *Mux) ProcessHtlc(
 				failureMessage = &lnwire.FailMPPTimeout{}
 			} else {
 				failureMessage = lnwire.NewFailIncorrectDetails(
-					lnwire.MilliSatoshi(htlc.amountMsat), 0,
+					lnwire.MilliSatoshi(htlc.outgoingAmountMsat), 0,
 				)
 			}
 
-			reason, err := obfuscator.EncryptFirstHop(failureMessage)
-			if err != nil {
-				return err
-			}
-
-			// Here we need more control over htlc
-			// interception so that we can send back an
-			// encrypted failure message to the sender.
-			return htlc.reply(&interceptedHtlcResponse{
-				action:         routerrpc.ResolveHoldForwardAction_FAIL,
-				failureMessage: reason,
-			})
+			return failLocal(failureMessage)
 
 		// Fail if we do not get a settle of fail resolution, since we
 		// are only expecting to handle settles and fails.
@@ -299,7 +330,7 @@ func (p *Mux) ProcessHtlc(
 	p.registry.NotifyExitHopHtlc(
 		&registryHtlc{
 			rHash:         htlc.hash,
-			amtPaid:       lnwire.MilliSatoshi(htlc.amountMsat),
+			amtPaid:       lnwire.MilliSatoshi(htlc.outgoingAmountMsat),
 			expiry:        htlc.expiry,
 			currentHeight: int32(height),
 			circuitKey:    htlc.circuitKey,

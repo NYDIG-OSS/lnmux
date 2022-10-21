@@ -227,14 +227,15 @@ func (i *interceptor) htlcReceiveLoop(ctx context.Context,
 
 		select {
 		case i.htlcChan <- &interceptedHtlc{
-			source:         i.pubKey,
-			circuitKey:     circuitKey,
-			hash:           hash,
-			onionBlob:      htlc.OnionBlob,
-			amountMsat:     int64(htlc.OutgoingAmountMsat),
-			expiry:         htlc.OutgoingExpiry,
-			outgoingChanID: htlc.OutgoingRequestedChanId,
-			reply:          reply,
+			source:             i.pubKey,
+			circuitKey:         circuitKey,
+			hash:               hash,
+			onionBlob:          htlc.OnionBlob,
+			incomingAmountMsat: htlc.IncomingAmountMsat,
+			outgoingAmountMsat: htlc.OutgoingAmountMsat,
+			expiry:             htlc.OutgoingExpiry,
+			outgoingChanID:     htlc.OutgoingRequestedChanId,
+			reply:              reply,
 		}:
 
 		case <-ctx.Done():
