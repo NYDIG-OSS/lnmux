@@ -95,7 +95,7 @@ type interceptedHtlc struct {
 	onionBlob          []byte
 	incomingAmountMsat uint64
 	outgoingAmountMsat uint64
-	expiry             uint32
+	outgoingExpiry     uint32
 	outgoingChanID     uint64
 
 	reply func(*interceptedHtlcResponse) error
@@ -331,7 +331,7 @@ func (p *Mux) ProcessHtlc(
 		&registryHtlc{
 			rHash:         htlc.hash,
 			amtPaid:       lnwire.MilliSatoshi(htlc.outgoingAmountMsat),
-			expiry:        htlc.expiry,
+			expiry:        htlc.outgoingExpiry,
 			currentHeight: int32(height),
 			circuitKey:    htlc.circuitKey,
 			payload:       payload,

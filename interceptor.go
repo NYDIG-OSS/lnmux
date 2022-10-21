@@ -232,7 +232,7 @@ func (i *interceptor) htlcReceiveLoop(ctx context.Context,
 			onionBlob:          htlc.OnionBlob,
 			incomingAmountMsat: htlc.IncomingAmountMsat,
 			outgoingAmountMsat: htlc.OutgoingAmountMsat,
-			expiry:             htlc.OutgoingExpiry,
+			outgoingExpiry:     htlc.OutgoingExpiry,
 			outgoingChanID:     htlc.OutgoingRequestedChanId,
 			reply:              reply,
 		}:
