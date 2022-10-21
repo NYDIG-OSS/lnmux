@@ -76,8 +76,10 @@ type queuedReply struct {
 }
 
 func (i *interceptor) start(ctx context.Context) error {
-	var cancel func()
-	ctx, cancel = context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	send, recv, err := i.lnd.HtlcInterceptor(ctx)
@@ -116,9 +118,6 @@ func (i *interceptor) start(ctx context.Context) error {
 		errChan   = make(chan error, 1)
 		replyChan = make(chan queuedReply, resolutionQueueSize)
 	)
-
-	var wg sync.WaitGroup
-	defer wg.Wait()
 
 	wg.Add(1)
 	go func(ctx context.Context) {

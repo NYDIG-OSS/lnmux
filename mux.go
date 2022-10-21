@@ -109,11 +109,11 @@ type interceptedHtlcResponse struct {
 }
 
 func (p *Mux) run(mainCtx context.Context) error {
-	ctx, cancel := context.WithCancel(mainCtx)
-	defer cancel()
-
 	var wg sync.WaitGroup
 	defer wg.Wait()
+
+	ctx, cancel := context.WithCancel(mainCtx)
+	defer cancel()
 
 	// Register for htlc interception and block events.
 	htlcChan := make(chan *interceptedHtlc)
