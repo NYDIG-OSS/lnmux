@@ -29,6 +29,7 @@ type Mux struct {
 	logger *zap.SugaredLogger
 
 	settledHandler *SettledHandler
+	routingPolicy  RoutingPolicy
 }
 
 type MuxConfig struct {
@@ -39,6 +40,16 @@ type MuxConfig struct {
 	Lnd      []lnd.LndClient
 	Logger   *zap.SugaredLogger
 	Registry *InvoiceRegistry
+
+	// RoutingPolicy is the policy that is enforced for the hop towards the
+	// virtual channel.
+	RoutingPolicy RoutingPolicy
+}
+
+type RoutingPolicy struct {
+	CltvDelta   int64
+	FeeBaseMsat int64
+	FeeRatePpm  int64
 }
 
 func New(cfg *MuxConfig) (*Mux,
@@ -70,6 +81,7 @@ func New(cfg *MuxConfig) (*Mux,
 		lnd:            cfg.Lnd,
 		logger:         cfg.Logger,
 		settledHandler: cfg.SettledHandler,
+		routingPolicy:  cfg.RoutingPolicy,
 	}, nil
 }
 
@@ -95,6 +107,7 @@ type interceptedHtlc struct {
 	onionBlob          []byte
 	incomingAmountMsat uint64
 	outgoingAmountMsat uint64
+	incomingExpiry     uint32
 	outgoingExpiry     uint32
 	outgoingChanID     uint64
 
@@ -109,6 +122,11 @@ type interceptedHtlcResponse struct {
 }
 
 func (p *Mux) run(mainCtx context.Context) error {
+	p.logger.Infow("Routing policy",
+		"cltvDelta", p.routingPolicy.CltvDelta,
+		"feeBaseMsat", p.routingPolicy.FeeBaseMsat,
+		"feeRatePpm", p.routingPolicy.FeeRatePpm)
+
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
@@ -192,10 +210,11 @@ func marshallFailureCode(code lnwire.FailCode) (
 	case lnwire.CodeInvalidOnionKey:
 		return lnrpc.Failure_INVALID_ONION_KEY, nil
 
-	case lnwire.CodeFeeInsufficient:
-		// Unfortunately lnrpc.Failure_FEE_INSUFFICIENT is not supported by lnd.
-		// Return 0, which is mapped to TemporaryChannelFailure.
-
+	// Unfortunately these codes are not supported by lnd. Return 0, which is
+	// mapped to TemporaryChannelFailure.
+	//
+	// See https://github.com/lightningnetwork/lnd/pull/7067
+	case lnwire.CodeFeeInsufficient, lnwire.CodeIncorrectCltvExpiry:
 		return 0, nil
 
 	default:
@@ -229,11 +248,24 @@ func (p *Mux) ProcessHtlc(
 	}
 
 	// Verify that the amount of the incoming htlc is at least what is forwarded
-	// over the virtual channel.
-	if htlc.incomingAmountMsat < htlc.outgoingAmountMsat {
-		logger.Debugw("Insufficient incoming htlc amount")
+	// over the virtual channel plus fee.
+	//
+	// TODO: Fee accounting for successful payments.
+	expectedFee := uint64(p.routingPolicy.FeeBaseMsat) +
+		(uint64(p.routingPolicy.FeeRatePpm)*htlc.outgoingAmountMsat)/1e6
+
+	if htlc.incomingAmountMsat < htlc.outgoingAmountMsat+expectedFee {
+		logger.Debugw("Insufficient incoming htlc amount",
+			"expectedFee", expectedFee)
 
 		return fail(lnwire.CodeFeeInsufficient)
+	}
+
+	// Verify that the cltv delta is sufficiently large.
+	if htlc.incomingExpiry < htlc.outgoingExpiry+uint32(p.routingPolicy.CltvDelta) {
+		logger.Debugw("Cltv delta insufficient")
+
+		return fail(lnwire.CodeIncorrectCltvExpiry)
 	}
 
 	// Try decode final hop onion. Expiry can be set to zero, because the
@@ -278,7 +310,7 @@ func (p *Mux) ProcessHtlc(
 	}
 
 	// Verify that the amount going out over the virtual channel matches what
-	// the sender intended.
+	// the sender intended. See BOLT 04.
 	if uint64(payload.ForwardingInfo().AmountToForward) !=
 		htlc.outgoingAmountMsat {
 
@@ -287,6 +319,16 @@ func (p *Mux) ProcessHtlc(
 		return failLocal(&lnwire.FailFinalIncorrectHtlcAmount{
 			IncomingHTLCAmount: lnwire.MilliSatoshi(htlc.outgoingAmountMsat),
 		})
+	}
+
+	// Verify that the expiry going out over the virtual channel matches what
+	// the sender intended. See BOLT 04.
+	if uint64(payload.ForwardingInfo().OutgoingCTLV) !=
+		uint64(htlc.outgoingExpiry) {
+
+		logger.Debugw("Final expiry mismatch")
+
+		return failLocal(&lnwire.FailFinalExpiryTooSoon{})
 	}
 
 	resolve := func(resolution HtlcResolution) error {

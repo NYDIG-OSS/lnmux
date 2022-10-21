@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/bottlepay/lnmux"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v2"
 )
@@ -43,6 +44,22 @@ type Config struct {
 	Logging LoggingConfig `yaml:"logging"`
 
 	DistributedLock DistributedLockConfig `yaml:"distributedLock"`
+
+	RoutingPolicy *RoutingPolicyConfig `yaml:"routingPolicy"`
+}
+
+type RoutingPolicyConfig struct {
+	// CltvDelta is the minimally required cltv delta for forwards towards the
+	// virtual channel.
+	CltvDelta int64 `yaml:"cltvDelta"`
+
+	// FeeBase is the base fee to charge for forwards towards the
+	// virtual channel.
+	FeeBaseMsat int64 `yaml:"feeBaseMsat"`
+
+	// FeeRate is the fee rate in ppm to charge for forwards towards the virtual
+	// channel.
+	FeeRatePpm int64 `yaml:"feeRatePpm"`
 }
 
 // LoggingConfig contains options related to log outputs.
@@ -78,6 +95,24 @@ func (c *Config) GetIdentityKey() ([32]byte, error) {
 	copy(key[:], keySlice)
 
 	return key, nil
+}
+
+var defaultRoutingPolicy = lnmux.RoutingPolicy{
+	FeeBaseMsat: 0,
+	FeeRatePpm:  0,
+	CltvDelta:   40,
+}
+
+func (c *Config) GetRoutingPolicy() lnmux.RoutingPolicy {
+	if c.RoutingPolicy == nil {
+		return defaultRoutingPolicy
+	}
+
+	return lnmux.RoutingPolicy{
+		CltvDelta:   c.RoutingPolicy.CltvDelta,
+		FeeBaseMsat: c.RoutingPolicy.FeeBaseMsat,
+		FeeRatePpm:  c.RoutingPolicy.FeeRatePpm,
+	}
 }
 
 type LndConfig struct {
