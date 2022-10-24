@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -30,6 +32,8 @@ type Mux struct {
 	routingPolicy  RoutingPolicy
 
 	virtualChannel uint64
+	muxKey         common.PubKey
+	nodeKey        common.PubKey
 }
 
 type MuxConfig struct {
@@ -52,9 +56,7 @@ type RoutingPolicy struct {
 	FeeRatePpm  int64
 }
 
-func New(cfg *MuxConfig) (*Mux,
-	error) {
-
+func New(cfg *MuxConfig) (*Mux, error) {
 	idKeyDesc, err := cfg.KeyRing.DeriveKey(
 		keychain.KeyLocator{
 			Family: keychain.KeyFamilyNodeKey,
@@ -66,6 +68,17 @@ func New(cfg *MuxConfig) (*Mux,
 	}
 
 	nodeKeyECDH := keychain.NewPubKeyECDH(idKeyDesc, cfg.KeyRing)
+
+	muxKubKey, err := cfg.KeyRing.DeriveKey(keychain.KeyLocator{})
+	if err != nil {
+		return nil, err
+	}
+	muxKey, err := common.NewPubKeyFromBytes(
+		muxKubKey.PubKey.SerializeCompressed(),
+	)
+	if err != nil {
+		return nil, err
+	}
 
 	replayLog := &replayLog{}
 
@@ -88,6 +101,8 @@ func New(cfg *MuxConfig) (*Mux,
 		settledHandler: cfg.SettledHandler,
 		routingPolicy:  cfg.RoutingPolicy,
 		virtualChannel: virtualChannel,
+		muxKey:         muxKey,
+		nodeKey:        cfg.Lnd.PubKey(),
 	}, nil
 }
 
@@ -105,10 +120,11 @@ type interceptedHtlc struct {
 }
 
 type interceptedHtlcResponse struct {
-	action         routerrpc.ResolveHoldForwardAction
-	preimage       lntypes.Preimage
-	failureMessage []byte
-	failureCode    lnrpc.Failure_FailureCode
+	action                    routerrpc.ResolveHoldForwardAction
+	preimage                  lntypes.Preimage
+	failureMessage            []byte
+	failureCode               lnrpc.Failure_FailureCode
+	failureMessageUnencrypted bool
 }
 
 func (p *Mux) Run(mainCtx context.Context) error {
@@ -220,6 +236,35 @@ func (p *Mux) ProcessHtlc(
 
 	fail := func(code lnwire.FailCode) error {
 		logger.Debugw("Failing htlc", "code", code)
+
+		if code == lnwire.CodeFeeInsufficient {
+			var channelFlags lnwire.ChanUpdateChanFlags
+
+			if bytes.Compare(p.muxKey[:], p.nodeKey[:]) == 1 {
+				channelFlags |= lnwire.ChanUpdateDirection
+			}
+
+			wireMsg := lnwire.NewFeeInsufficient(0, lnwire.ChannelUpdate{
+				ChainHash:      *p.lnd.Network().GenesisHash,
+				ShortChannelID: lnwire.NewShortChanIDFromInt(p.virtualChannel),
+				Timestamp:      uint32(time.Now().Unix()),
+				ChannelFlags:   channelFlags,
+				TimeLockDelta:  uint16(p.routingPolicy.CltvDelta),
+				BaseFee:        uint32(p.routingPolicy.FeeBaseMsat),
+				FeeRate:        uint32(p.routingPolicy.FeeRatePpm),
+			})
+			var w bytes.Buffer
+			err := lnwire.EncodeFailureMessage(&w, wireMsg, 0)
+			if err != nil {
+				return err
+			}
+
+			return htlc.reply(&interceptedHtlcResponse{
+				action:                    routerrpc.ResolveHoldForwardAction_FAIL,
+				failureMessage:            w.Bytes(),
+				failureMessageUnencrypted: true,
+			})
+		}
 
 		rpcCode, err := marshallFailureCode(code)
 		if err != nil {
