@@ -162,7 +162,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 }
 
 func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
-	hash lntypes.Hash, key types.HtlcKey) (bool, error) {
+	key types.HtlcKey) (bool, error) {
 
 	var invoiceSettled bool
 
@@ -177,16 +177,19 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 
 		result, err := tx.ModelContext(ctx, &htlc).
 			WherePK().
-			Where("hash=?", hash).
 			Set("settled=?", true).
 			Set("settled_at=?", now).
+			Returning("hash").
 			Update() // nolint:contextcheck
-		if err != nil {
+		switch {
+		case err == pg.ErrNoRows:
+			return types.ErrHtlcNotFound
+
+		case err != nil:
 			return err
 		}
-		if result.RowsAffected() == 0 {
-			return types.ErrHtlcNotFound
-		}
+
+		hash := htlc.Hash
 
 		count, err := tx.ModelContext(ctx, (*dbHtlc)(nil)).
 			Where("hash=?", hash).

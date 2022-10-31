@@ -46,9 +46,7 @@ func (p *SettledHandler) preSendHandler(ctx context.Context, node common.PubKey,
 		HtlcID: item.incomingKey.HtlcID,
 	}
 
-	invoiceSettled, err := p.persister.MarkHtlcSettled(
-		ctx, item.hash, htlcKey,
-	)
+	invoiceSettled, err := p.persister.MarkHtlcSettled(ctx, htlcKey)
 	if err != nil {
 		return err
 	}
