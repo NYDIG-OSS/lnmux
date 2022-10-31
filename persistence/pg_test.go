@@ -69,13 +69,13 @@ func TestSettleInvoice(t *testing.T) {
 	})
 	require.ErrorIs(t, err, types.ErrHtlcNotFound)
 
-	invoiceSettled, err := persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
+	settledHash, err := persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
 		ChanID: 10,
 		HtlcID: 11,
 	})
 	require.NoError(t, err)
-	require.False(t, invoiceSettled)
+	require.Nil(t, settledHash)
 
 	_, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
@@ -88,13 +88,13 @@ func TestSettleInvoice(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, invoice.Settled)
 
-	invoiceSettled, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
+	settledHash, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
 		ChanID: 11,
 		HtlcID: 12,
 	})
 	require.NoError(t, err)
-	require.True(t, invoiceSettled)
+	require.Equal(t, hash, *settledHash)
 
 	invoice, htlcs, err = persister.Get(context.Background(), hash)
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestConcurrentHtlcSettle(t *testing.T) {
 			invoiceSettled, err := persister.MarkHtlcSettled(context.Background(), htlc)
 			require.NoError(t, err)
 
-			settledChan <- invoiceSettled
+			settledChan <- invoiceSettled != nil
 		}()
 	}
 
@@ -203,13 +203,13 @@ func TestGetSettledInvoices(t *testing.T) {
 
 	// Settled the two first invoices but not the last
 	for i := 0; i < 2; i++ {
-		var invoiceSettled bool
+		var invoiceSettled *lntypes.Hash
 		for htlc := range invoices[i].htlcs {
 			var err error
 			invoiceSettled, err = persister.MarkHtlcSettled(context.Background(), htlc)
 			require.NoError(t, err)
 		}
-		require.True(t, invoiceSettled)
+		require.NotNil(t, invoiceSettled)
 	}
 
 	// Ask only for the first settled or to be settled invoice

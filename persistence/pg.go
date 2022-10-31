@@ -214,9 +214,9 @@ func (p *PostgresPersister) getHtlcHash(ctx context.Context, tx *pg.Tx,
 }
 
 func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
-	key types.HtlcKey) (bool, error) {
+	key types.HtlcKey) (*lntypes.Hash, error) {
 
-	var invoiceSettled bool
+	var settledHash *lntypes.Hash
 
 	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
 		// Select invoice FOR UPDATE to prevent incorrect counts when multiple
@@ -259,15 +259,15 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			return types.ErrInvoiceNotFound
 		}
 
-		invoiceSettled = true
+		settledHash = &invoice.Hash
 
 		return nil
 	})
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
-	return invoiceSettled, nil
+	return settledHash, nil
 }
 
 func (p *PostgresPersister) selectInvoiceForUpdate(ctx context.Context,
