@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/bottlepay/lnmux/lnmuxrpc v0.0.0-00010101000000-000000000000
-	github.com/btcsuite/btcd v0.23.3
+	github.com/btcsuite/btcd v0.23.2
 	github.com/btcsuite/btcd/btcec/v2 v2.2.1
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1
 	github.com/go-pg/migrations/v8 v8.1.0
@@ -14,7 +14,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/lightningnetwork/lightning-onion v1.0.2-0.20220211021909-bb84a1ccb0c5
-	github.com/lightningnetwork/lnd v0.15.4-beta
+	github.com/lightningnetwork/lnd v0.15.0-beta.rc6.0.20221031073548-84401f6f6ce8
 	github.com/lightningnetwork/lnd/clock v1.1.0
 	github.com/lightningnetwork/lnd/queue v1.1.0
 	github.com/prometheus/client_golang v1.11.0
@@ -103,7 +103,7 @@ require (
 	github.com/lightningnetwork/lnd/kvdb v1.3.1 // indirect
 	github.com/lightningnetwork/lnd/ticker v1.1.0 // indirect
 	github.com/lightningnetwork/lnd/tlv v1.0.3 // indirect
-	github.com/lightningnetwork/lnd/tor v1.0.1 // indirect
+	github.com/lightningnetwork/lnd/tor v1.1.0 // indirect
 	github.com/ltcsuite/ltcd v0.20.1-beta // indirect
 	github.com/mailru/easyjson v0.7.6 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
