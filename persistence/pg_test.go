@@ -69,13 +69,13 @@ func TestSettleInvoice(t *testing.T) {
 	})
 	require.ErrorIs(t, err, types.ErrHtlcNotFound)
 
-	invoiceSettled, err := persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
+	settledHash, err := persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
 		ChanID: 10,
 		HtlcID: 11,
 	})
 	require.NoError(t, err)
-	require.False(t, invoiceSettled)
+	require.Nil(t, settledHash)
 
 	_, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
@@ -88,13 +88,13 @@ func TestSettleInvoice(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, invoice.Settled)
 
-	invoiceSettled, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
+	settledHash, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
 		ChanID: 11,
 		HtlcID: 12,
 	})
 	require.NoError(t, err)
-	require.True(t, invoiceSettled)
+	require.Equal(t, hash, *settledHash)
 
 	invoice, htlcs, err = persister.Get(context.Background(), hash)
 	require.NoError(t, err)

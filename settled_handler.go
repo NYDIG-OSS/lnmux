@@ -46,7 +46,7 @@ func (p *SettledHandler) preSendHandler(ctx context.Context, node common.PubKey,
 		HtlcID: item.incomingKey.HtlcID,
 	}
 
-	invoiceSettled, err := p.persister.MarkHtlcSettled(ctx, htlcKey)
+	settledHash, err := p.persister.MarkHtlcSettled(ctx, htlcKey)
 	switch {
 	// If htlc is already marked as settled, exit early. This can happen when
 	// the settle instruction didn't reach lnd in a previous run.
@@ -57,7 +57,7 @@ func (p *SettledHandler) preSendHandler(ctx context.Context, node common.PubKey,
 		return err
 	}
 
-	if invoiceSettled {
+	if settledHash != nil {
 		p.waitersLock.Lock()
 
 		waiters := p.waiters[item.hash]
