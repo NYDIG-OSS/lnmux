@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/persistence/test"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lntypes"
@@ -40,12 +41,15 @@ func TestSettleInvoice(t *testing.T) {
 	_, _, err := persister.Get(context.Background(), hash)
 	require.ErrorIs(t, err, types.ErrInvoiceNotFound)
 
-	htlcs := map[types.CircuitKey]int64{
+	nodeKey := common.PubKey{1}
+	htlcs := map[types.HtlcKey]int64{
 		{
+			Node:   nodeKey,
 			ChanID: 10,
 			HtlcID: 11,
 		}: 70,
 		{
+			Node:   nodeKey,
 			ChanID: 11,
 			HtlcID: 12,
 		}: 30,
@@ -58,20 +62,23 @@ func TestSettleInvoice(t *testing.T) {
 		},
 	}, htlcs))
 
-	_, err = persister.MarkHtlcSettled(context.Background(), hash, types.CircuitKey{
+	_, err = persister.MarkHtlcSettled(context.Background(), hash, types.HtlcKey{
+		Node:   nodeKey,
 		ChanID: 99,
 		HtlcID: 99,
 	})
 	require.ErrorIs(t, err, types.ErrHtlcNotFound)
 
-	invoiceSettled, err := persister.MarkHtlcSettled(context.Background(), hash, types.CircuitKey{
+	invoiceSettled, err := persister.MarkHtlcSettled(context.Background(), hash, types.HtlcKey{
+		Node:   nodeKey,
 		ChanID: 10,
 		HtlcID: 11,
 	})
 	require.NoError(t, err)
 	require.False(t, invoiceSettled)
 
-	invoiceSettled, err = persister.MarkHtlcSettled(context.Background(), hash, types.CircuitKey{
+	invoiceSettled, err = persister.MarkHtlcSettled(context.Background(), hash, types.HtlcKey{
+		Node:   nodeKey,
 		ChanID: 10,
 		HtlcID: 11,
 	})
@@ -82,7 +89,8 @@ func TestSettleInvoice(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, invoice.Settled)
 
-	invoiceSettled, err = persister.MarkHtlcSettled(context.Background(), hash, types.CircuitKey{
+	invoiceSettled, err = persister.MarkHtlcSettled(context.Background(), hash, types.HtlcKey{
+		Node:   nodeKey,
 		ChanID: 11,
 		HtlcID: 12,
 	})

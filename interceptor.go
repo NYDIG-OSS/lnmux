@@ -19,7 +19,7 @@ const (
 	resolutionQueueSize = 100
 )
 
-type preSendCallbackFunc func(context.Context, queuedReply) error
+type preSendCallbackFunc func(context.Context, common.PubKey, queuedReply) error
 
 type interceptor struct {
 	lnd             lnd.LndClient
@@ -147,7 +147,7 @@ func (i *interceptor) start(ctx context.Context) error {
 				return errors.New("reply channel full")
 			}
 
-			if err := i.preSendCallback(ctx, item); err != nil {
+			if err := i.preSendCallback(ctx, i.pubKey, item); err != nil {
 				return fmt.Errorf("pre-send callback failed: %w", err)
 			}
 

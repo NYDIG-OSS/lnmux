@@ -369,13 +369,19 @@ func (p *Mux) ProcessHtlc(
 	}
 
 	// Notify the invoice registry of the intercepted htlc.
+	htlcKey := types.HtlcKey{
+		ChanID: htlc.circuitKey.ChanID,
+		HtlcID: htlc.circuitKey.HtlcID,
+		Node:   htlc.source,
+	}
+
 	p.registry.NotifyExitHopHtlc(
 		&registryHtlc{
 			rHash:         htlc.hash,
 			amtPaid:       lnwire.MilliSatoshi(htlc.outgoingAmountMsat),
 			expiry:        htlc.outgoingExpiry,
 			currentHeight: int32(height),
-			circuitKey:    htlc.circuitKey,
+			circuitKey:    htlcKey,
 			payload:       payload,
 			resolve: func(res HtlcResolution) {
 				err := resolve(res)

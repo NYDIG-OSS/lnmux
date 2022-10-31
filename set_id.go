@@ -1,6 +1,7 @@
 package lnmux
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"sort"
@@ -16,27 +17,45 @@ func (s SetID) String() string {
 
 // newSetID calculates a deterministic hash over a set of htlc circuit
 // keys.
-func newSetID(keys []types.CircuitKey) SetID {
-	sortedKeys := make([]types.CircuitKey, len(keys))
+func newSetID(keys []types.HtlcKey) SetID {
+	sortedKeys := make([]types.HtlcKey, len(keys))
 	copy(sortedKeys, keys)
 
 	sort.Slice(sortedKeys, func(a, b int) bool {
-		if sortedKeys[a].ChanID == sortedKeys[b].ChanID {
-			return sortedKeys[a].HtlcID < sortedKeys[b].HtlcID
+		if sortedKeys[a].Node != sortedKeys[b].Node {
+			return bytes.Compare(sortedKeys[a].Node[:], sortedKeys[b].Node[:]) == -1
 		}
 
-		return sortedKeys[a].ChanID < sortedKeys[b].ChanID
+		if sortedKeys[a].ChanID != sortedKeys[b].ChanID {
+			return sortedKeys[a].ChanID < sortedKeys[b].ChanID
+		}
+
+		return sortedKeys[a].HtlcID < sortedKeys[b].HtlcID
 	})
 
-	keysBytes := make([]byte, len(sortedKeys)*16)
-	idx := 0
+	digest := sha256.New()
+	scratch := make([]byte, 8)
+
 	for _, key := range sortedKeys {
-		byteOrder.PutUint64(keysBytes[idx:], key.ChanID)
-		byteOrder.PutUint64(keysBytes[idx+8:], key.HtlcID)
-		idx += 16
+		// Panic on error because this cannot happen in the current
+		// implementation of digest.
+		if _, err := digest.Write(key.Node[:]); err != nil {
+			panic(err)
+		}
+
+		byteOrder.PutUint64(scratch, key.ChanID)
+		if _, err := digest.Write(scratch); err != nil {
+			panic(err)
+		}
+
+		byteOrder.PutUint64(scratch, key.HtlcID)
+		if _, err := digest.Write(scratch); err != nil {
+			panic(err)
+		}
 	}
 
-	hash := sha256.Sum256(keysBytes)
+	var setID SetID
+	copy(setID[:], digest.Sum(nil))
 
-	return hash
+	return setID
 }

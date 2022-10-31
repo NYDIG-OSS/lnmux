@@ -4,7 +4,9 @@ import (
 	"context"
 	"sync"
 
+	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/persistence"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"go.uber.org/zap"
@@ -31,12 +33,22 @@ func NewSettledHandler(cfg *SettledHandlerConfig) *SettledHandler {
 	}
 }
 
-func (p *SettledHandler) preSendHandler(ctx context.Context, item queuedReply) error {
+func (p *SettledHandler) preSendHandler(ctx context.Context, node common.PubKey,
+	item queuedReply) error {
+
 	if item.resp.action != routerrpc.ResolveHoldForwardAction_SETTLE {
 		return nil
 	}
 
-	invoiceSettled, err := p.persister.MarkHtlcSettled(ctx, item.hash, item.incomingKey)
+	htlcKey := types.HtlcKey{
+		Node:   node,
+		ChanID: item.incomingKey.ChanID,
+		HtlcID: item.incomingKey.HtlcID,
+	}
+
+	invoiceSettled, err := p.persister.MarkHtlcSettled(
+		ctx, item.hash, htlcKey,
+	)
 	if err != nil {
 		return err
 	}

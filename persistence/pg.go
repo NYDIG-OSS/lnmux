@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/go-pg/pg/v10"
 	"github.com/lightningnetwork/lnd/lntypes"
@@ -46,10 +47,11 @@ type dbInvoice struct {
 type dbHtlc struct {
 	tableName struct{} `pg:"lnmux.htlcs,discard_unknown_columns"` // nolint
 
-	Hash       lntypes.Hash `pg:"hash,use_zero"`
-	ChanID     uint64       `pg:"chan_id,use_zero,pk"`
-	HtlcID     uint64       `pg:"htlc_id,use_zero,pk"`
-	AmountMsat int64        `pg:"amount_msat,use_zero"`
+	Node       common.PubKey `pg:"node,use_zero"`
+	Hash       lntypes.Hash  `pg:"hash,use_zero"`
+	ChanID     uint64        `pg:"chan_id,use_zero,pk"`
+	HtlcID     uint64        `pg:"htlc_id,use_zero,pk"`
+	AmountMsat int64         `pg:"amount_msat,use_zero"`
 
 	SettleRequestedAt time.Time `pg:"settle_requested_at"`
 
@@ -77,9 +79,9 @@ func unmarshallDbInvoice(invoice *dbInvoice) *Invoice {
 }
 
 func (p *PostgresPersister) Get(ctx context.Context, hash lntypes.Hash) (*Invoice,
-	map[types.CircuitKey]int64, error) {
+	map[types.HtlcKey]int64, error) {
 
-	var htlcs = make(map[types.CircuitKey]int64)
+	var htlcs = make(map[types.HtlcKey]int64)
 
 	var invoice *Invoice
 
@@ -105,7 +107,8 @@ func (p *PostgresPersister) Get(ctx context.Context, hash lntypes.Hash) (*Invoic
 		invoice = unmarshallDbInvoice(&dbInvoice)
 
 		for _, htlc := range dbHtlcs {
-			htlcs[types.CircuitKey{
+			htlcs[types.HtlcKey{
+				Node:   htlc.Node,
 				ChanID: htlc.ChanID,
 				HtlcID: htlc.HtlcID,
 			}] = htlc.AmountMsat
@@ -121,7 +124,7 @@ func (p *PostgresPersister) Get(ctx context.Context, hash lntypes.Hash) (*Invoic
 }
 
 func (p *PostgresPersister) RequestSettle(ctx context.Context,
-	invoice *InvoiceCreationData, htlcs map[types.CircuitKey]int64) error {
+	invoice *InvoiceCreationData, htlcs map[types.HtlcKey]int64) error {
 
 	return p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
 		now := time.Now().UTC()
@@ -140,6 +143,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 
 		for key, amt := range htlcs {
 			dbHtlc := dbHtlc{
+				Node:              key.Node,
 				Hash:              invoice.PaymentPreimage.Hash(),
 				ChanID:            key.ChanID,
 				HtlcID:            key.HtlcID,
@@ -157,7 +161,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 }
 
 func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
-	hash lntypes.Hash, key types.CircuitKey) (bool, error) {
+	hash lntypes.Hash, key types.HtlcKey) (bool, error) {
 
 	var invoiceSettled bool
 
@@ -165,6 +169,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 		now := time.Now().UTC()
 
 		htlc := dbHtlc{
+			Node:   key.Node,
 			ChanID: key.ChanID,
 			HtlcID: key.HtlcID,
 		}

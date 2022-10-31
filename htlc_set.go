@@ -6,15 +6,15 @@ import (
 )
 
 type htlcSet interface {
-	addHtlc(key types.CircuitKey, amt int64)
+	addHtlc(key types.HtlcKey, amt int64)
 
-	getHtlcMap() map[types.CircuitKey]int64
-	accepted(key types.CircuitKey) bool
+	getHtlcMap() map[types.HtlcKey]int64
+	accepted(key types.HtlcKey) bool
 	totalSetAmt() int64
 	isComplete() *SetID
 
-	deleteAll(cb func(types.CircuitKey))
-	deleteHtlc(key types.CircuitKey)
+	deleteAll(cb func(types.HtlcKey))
+	deleteHtlc(key types.HtlcKey)
 
 	hash() lntypes.Hash
 	paymentAddr() [32]byte
@@ -24,7 +24,7 @@ type htlcSet interface {
 
 type htlcSetImpl struct {
 	params htlcSetParameters
-	htlcs  map[types.CircuitKey]int64
+	htlcs  map[types.HtlcKey]int64
 
 	parent *htlcSetsImpl
 }
@@ -34,12 +34,12 @@ func newHtlcSetImpl(parent *htlcSetsImpl,
 
 	return &htlcSetImpl{
 		params: params,
-		htlcs:  make(map[types.CircuitKey]int64),
+		htlcs:  make(map[types.HtlcKey]int64),
 		parent: parent,
 	}
 }
 
-func (h *htlcSetImpl) deleteAll(cb func(types.CircuitKey)) {
+func (h *htlcSetImpl) deleteAll(cb func(types.HtlcKey)) {
 	for key := range h.htlcs {
 		cb(key)
 	}
@@ -61,7 +61,7 @@ func (h *htlcSetImpl) isComplete() *SetID {
 		return nil
 	}
 
-	var keys []types.CircuitKey
+	var keys []types.HtlcKey
 	for htlc := range h.htlcs {
 		keys = append(keys, htlc)
 	}
@@ -87,8 +87,8 @@ func (h *htlcSetImpl) preimage() lntypes.Preimage {
 	return h.params.preimage
 }
 
-func (h *htlcSetImpl) getHtlcMap() map[types.CircuitKey]int64 {
-	htlcMap := make(map[types.CircuitKey]int64)
+func (h *htlcSetImpl) getHtlcMap() map[types.HtlcKey]int64 {
+	htlcMap := make(map[types.HtlcKey]int64)
 	for key, amt := range h.htlcs {
 		htlcMap[key] = amt
 	}
@@ -96,13 +96,13 @@ func (h *htlcSetImpl) getHtlcMap() map[types.CircuitKey]int64 {
 	return htlcMap
 }
 
-func (h *htlcSetImpl) accepted(key types.CircuitKey) bool {
+func (h *htlcSetImpl) accepted(key types.HtlcKey) bool {
 	_, ok := h.htlcs[key]
 
 	return ok
 }
 
-func (h *htlcSetImpl) deleteHtlc(key types.CircuitKey) {
+func (h *htlcSetImpl) deleteHtlc(key types.HtlcKey) {
 	_, ok := h.htlcs[key]
 	if !ok {
 		panic("htlc not found")
@@ -115,7 +115,7 @@ func (h *htlcSetImpl) deleteHtlc(key types.CircuitKey) {
 	}
 }
 
-func (h *htlcSetImpl) addHtlc(key types.CircuitKey, amt int64) {
+func (h *htlcSetImpl) addHtlc(key types.HtlcKey, amt int64) {
 	if _, ok := h.htlcs[key]; ok {
 		panic("htlc already exists")
 	}
