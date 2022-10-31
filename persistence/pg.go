@@ -33,8 +33,8 @@ type InvoiceCreationData struct {
 type dbInvoice struct {
 	tableName struct{} `pg:"lnmux.invoices,discard_unknown_columns"` // nolint
 
-	Hash       lntypes.Hash     `pg:"hash,pk"`
-	Preimage   lntypes.Preimage `pg:"preimage"`
+	Hash       lntypes.Hash     `pg:"hash,use_zero,pk"`
+	Preimage   lntypes.Preimage `pg:"preimage,use_zero"`
 	AmountMsat int64            `pg:"amount_msat,use_zero"`
 
 	SettleRequestedAt time.Time `pg:"settle_requested_at"`
@@ -46,7 +46,7 @@ type dbInvoice struct {
 type dbHtlc struct {
 	tableName struct{} `pg:"lnmux.htlcs,discard_unknown_columns"` // nolint
 
-	Hash       lntypes.Hash `pg:"hash"`
+	Hash       lntypes.Hash `pg:"hash,use_zero"`
 	ChanID     uint64       `pg:"chan_id,use_zero,pk"`
 	HtlcID     uint64       `pg:"htlc_id,use_zero,pk"`
 	AmountMsat int64        `pg:"amount_msat,use_zero"`
