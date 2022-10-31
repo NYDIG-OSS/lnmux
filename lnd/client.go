@@ -21,7 +21,7 @@ import (
 
 var ErrInterceptorNotRequired = errors.New("lnd requireinterceptor flag not set")
 
-var minRequiredLndVersion, _ = version.NewSemver("v0.15.4-beta")
+var minRequiredLndVersion, _ = version.NewSemver("v0.16.0-beta.rc2")
 
 type LndClient interface {
 	PubKey() common.PubKey
