@@ -18,14 +18,13 @@ import (
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwire"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 )
 
 type Mux struct {
 	registry *InvoiceRegistry
 	sphinx   *hop.OnionProcessor
 
-	lnd    []lnd.LndClient
+	lnd    lnd.LndClient
 	logger *zap.SugaredLogger
 
 	settledHandler *SettledHandler
@@ -37,7 +36,7 @@ type MuxConfig struct {
 	ActiveNetParams *chaincfg.Params
 	SettledHandler  *SettledHandler
 
-	Lnd      []lnd.LndClient
+	Lnd      lnd.LndClient
 	Logger   *zap.SugaredLogger
 	Registry *InvoiceRegistry
 
@@ -85,21 +84,6 @@ func New(cfg *MuxConfig) (*Mux,
 	}, nil
 }
 
-func (p *Mux) Run(ctx context.Context) error {
-	group, ctx := errgroup.WithContext(ctx)
-
-	group.Go(func() error {
-		return p.registry.Run(ctx)
-	})
-
-	// Start multiplexer main loop.
-	group.Go(func() error {
-		return p.run(ctx)
-	})
-
-	return group.Wait()
-}
-
 type interceptedHtlc struct {
 	source             common.PubKey
 	circuitKey         types.CircuitKey
@@ -121,7 +105,7 @@ type interceptedHtlcResponse struct {
 	failureCode    lnrpc.Failure_FailureCode
 }
 
-func (p *Mux) run(mainCtx context.Context) error {
+func (p *Mux) Run(mainCtx context.Context) error {
 	p.logger.Infow("Routing policy",
 		"cltvDelta", p.routingPolicy.CltvDelta,
 		"feeBaseMsat", p.routingPolicy.FeeBaseMsat,
@@ -137,19 +121,17 @@ func (p *Mux) run(mainCtx context.Context) error {
 	htlcChan := make(chan *interceptedHtlc)
 	heightChan := make(chan int)
 
-	for _, lnd := range p.lnd {
-		interceptor := newInterceptor(
-			lnd, p.logger, htlcChan, heightChan,
-			p.settledHandler.preSendHandler,
-		)
+	interceptor := newInterceptor(
+		p.lnd, p.logger, htlcChan, heightChan,
+		p.settledHandler.preSendHandler,
+	)
 
-		wg.Add(1)
-		go func(ctx context.Context) {
-			defer wg.Done()
+	wg.Add(1)
+	go func(ctx context.Context) {
+		defer wg.Done()
 
-			interceptor.run(ctx)
-		}(ctx)
-	}
+		interceptor.run(ctx)
+	}(ctx)
 
 	// All connected lnd nodes will immediately send the current block height.
 	// Pick up the first height received to initialize our local height.

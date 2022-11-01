@@ -159,24 +159,31 @@ func TestMux(t *testing.T) {
 		Logger:    logger.Sugar(),
 	})
 
-	mux, err := New(&MuxConfig{
-		KeyRing:         keyRing,
-		ActiveNetParams: activeNetParams,
-		Lnd:             []lnd.LndClient{l[0].client, l[1].client},
-		Logger:          logger.Sugar(),
-		Registry:        registry,
-		SettledHandler:  settledHandler,
-		RoutingPolicy:   routingPolicy,
-	})
-	require.NoError(t, err)
-
 	errChan := make(chan error)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go func() {
-		errChan <- mux.Run(ctx)
+		errChan <- registry.Run(ctx)
 	}()
+
+	for _, lnd := range []lnd.LndClient{l[0].client, l[1].client} {
+		mux, err := New(&MuxConfig{
+			KeyRing:         keyRing,
+			ActiveNetParams: activeNetParams,
+			Lnd:             lnd,
+			Logger:          logger.Sugar(),
+			Registry:        registry,
+			SettledHandler:  settledHandler,
+			RoutingPolicy:   routingPolicy,
+		})
+		require.NoError(t, err)
+
+		go func() {
+			errChan <- mux.Run(ctx)
+		}()
+	}
 
 	var acceptChan = make(chan acceptEvent, 1)
 	cancelAcceptSubscription, err := registry.SubscribeAccept(
@@ -378,6 +385,10 @@ func TestMux(t *testing.T) {
 	cancelAcceptSubscription()
 
 	cancel()
+
+	// Expect no errors for the two mux instances and the registry.
+	require.NoError(t, <-errChan)
+	require.NoError(t, <-errChan)
 	require.NoError(t, <-errChan)
 }
 

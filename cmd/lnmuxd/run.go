@@ -173,20 +173,6 @@ func run(ctx context.Context, cfg *Config) error {
 		},
 	)
 
-	mux, err := lnmux.New(
-		&lnmux.MuxConfig{
-			KeyRing:         keyRing,
-			ActiveNetParams: activeNetParams,
-			Lnd:             lnds,
-			Logger:          log,
-			Registry:        registry,
-			SettledHandler:  settledHandler,
-			RoutingPolicy:   routingPolicy,
-		})
-	if err != nil {
-		return err
-	}
-
 	// Instantiate grpc server and enable reflection and Prometheus metrics.
 	streamInterceptors := []grpc.StreamServerInterceptor{
 		grpc_prometheus.StreamServerInterceptor,
@@ -249,17 +235,46 @@ func run(ctx context.Context, cfg *Config) error {
 		return err
 	}
 
-	group, ctx := errgroup.WithContext(ctx)
-
-	// Run multiplexer.
-	group.Go(func() error {
-		err := mux.Run(ctx)
+	// Instantiate multiplexers.
+	var muxes []*lnmux.Mux
+	for _, lnd := range lnds {
+		mux, err := lnmux.New(
+			&lnmux.MuxConfig{
+				KeyRing:         keyRing,
+				ActiveNetParams: activeNetParams,
+				Lnd:             lnd,
+				Logger:          log,
+				Registry:        registry,
+				SettledHandler:  settledHandler,
+				RoutingPolicy:   routingPolicy,
+			})
 		if err != nil {
-			log.Errorw("mux error", "err", err)
+			return err
 		}
 
-		return err
+		muxes = append(muxes, mux)
+	}
+
+	group, ctx := errgroup.WithContext(ctx)
+
+	// Run registry.
+	group.Go(func() error {
+		return registry.Run(ctx)
 	})
+
+	// Run multiplexers.
+	for _, mux := range muxes {
+		mux := mux
+
+		group.Go(func() error {
+			err := mux.Run(ctx)
+			if err != nil {
+				log.Errorw("mux error", "err", err)
+			}
+
+			return err
+		})
+	}
 
 	// Run grpc server.
 	group.Go(func() error {
