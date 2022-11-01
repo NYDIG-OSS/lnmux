@@ -29,31 +29,26 @@ var disconnectedNodesGaugeMetric = promauto.NewGauge(
 	},
 )
 
-type preSendCallbackFunc func(context.Context, common.PubKey, queuedReply) error
-
 type interceptor struct {
-	lnd             lnd.LndClient
-	logger          *zap.SugaredLogger
-	pubKey          common.PubKey
-	htlcChan        chan *interceptedHtlc
-	heightChan      chan int
-	preSendCallback preSendCallbackFunc
+	lnd        lnd.LndClient
+	logger     *zap.SugaredLogger
+	pubKey     common.PubKey
+	htlcChan   chan *interceptedHtlc
+	heightChan chan int
 }
 
 func newInterceptor(lnd lnd.LndClient, logger *zap.SugaredLogger,
-	htlcChan chan *interceptedHtlc, heightChan chan int,
-	preSendCallback preSendCallbackFunc) *interceptor {
+	htlcChan chan *interceptedHtlc, heightChan chan int) *interceptor {
 
 	pubKey := lnd.PubKey()
 	logger = logger.With("node", pubKey)
 
 	return &interceptor{
-		lnd:             lnd,
-		logger:          logger,
-		pubKey:          pubKey,
-		htlcChan:        htlcChan,
-		heightChan:      heightChan,
-		preSendCallback: preSendCallback,
+		lnd:        lnd,
+		logger:     logger,
+		pubKey:     pubKey,
+		htlcChan:   htlcChan,
+		heightChan: heightChan,
 	}
 }
 
@@ -165,10 +160,6 @@ func (i *interceptor) start(ctx context.Context) error {
 		case item, ok := <-replyChan:
 			if !ok {
 				return errors.New("reply channel full")
-			}
-
-			if err := i.preSendCallback(ctx, i.pubKey, item); err != nil {
-				return fmt.Errorf("pre-send callback failed: %w", err)
 			}
 
 			rpcResp := &routerrpc.ForwardHtlcInterceptResponse{

@@ -8,12 +8,16 @@ Even with all nodes in the cluster available, it can be advantageous for the sen
 
 ## Running
 
-For the setup, it is assumed that there are multiple LND nodes running with connections to the wider Lightning network and sufficient inbound liquidity. The minimally required version of lnd is v0.15.0-beta.
+For the setup, it is assumed that there are multiple LND nodes running with connections to the wider Lightning network and sufficient inbound liquidity. The minimally required version of lnd is v0.16.0-beta.
 
 * Run the `lnd` nodes with the `--requireinterceptor` option. This ensures that
   HTLCs are always offered to interceptor applications eventually, even when
   there are momentary disconnects. Not running with this option can lead to
   HTLCs failing after the invoice that they pay to has been marked as settled.
+
+* Run the `lnd` nodes with the `--store-final-htlc-resolutions` option. This
+  switches on persistent storage of the final htlc resolution, which is needed
+  to move an invoice in lnmux to its final state.
 
 * Create a postgres database. Note that `lnmux` uses stateless invoices. This means that the database only contains settled invoices.
 

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/bottlepay/lnmux/common"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/hashicorp/go-version"
 	"github.com/lightningnetwork/lnd/lnrpc"
@@ -15,11 +16,19 @@ import (
 	"github.com/lightningnetwork/lnd/lnrpc/verrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 //go:generate mockgen --destination=mock_lnd_client.go --self_package=github.com/bottlepay/lnmux/lnd --package=lnd github.com/bottlepay/lnmux/lnd LndClient
 
-var ErrInterceptorNotRequired = errors.New("lnd requireinterceptor flag not set")
+var (
+	ErrInterceptorNotRequired = errors.New("lnd requireinterceptor flag not set")
+
+	ErrFinalHtlcResolutionsNotStored = errors.New("lnd store-final-htlc-resolutions flag not set")
+
+	ErrHtlcNotFound = errors.New("htlc not found")
+)
 
 var minRequiredLndVersion, _ = version.NewSemver("v0.16.0-beta.rc2")
 
@@ -34,6 +43,11 @@ type LndClient interface {
 		func(*routerrpc.ForwardHtlcInterceptResponse) error,
 		func() (*routerrpc.ForwardHtlcInterceptRequest, error),
 		error)
+
+	HtlcNotifier(ctx context.Context) (
+		func() (*routerrpc.HtlcEvent, error), error)
+
+	LookupHtlc(ctx context.Context, key types.CircuitKey) (bool, error)
 }
 
 type lndClient struct {
@@ -151,6 +165,13 @@ func (l *lndClient) tryValidateConfig(ctx context.Context) error {
 		return ErrInterceptorNotRequired
 	}
 
+	// Check to see if lnd is running with --store-final-htlc-resolutions.
+	// Otherwise we can't obtain final resolution information and invoices will
+	// never be marked as settled.
+	if !info.StoreFinalHtlcResolutions {
+		return ErrFinalHtlcResolutionsNotStored
+	}
+
 	// Set flag to prevent checking again.
 	l.configCheckPassed = true
 
@@ -214,4 +235,75 @@ func (l *lndClient) HtlcInterceptor(ctx context.Context) (
 	}
 
 	return stream.Send, stream.Recv, nil
+}
+
+func mapGrpcError(err error) error {
+	switch status.Code(err) {
+	case codes.OK:
+		return nil
+
+	case codes.DeadlineExceeded:
+		return context.DeadlineExceeded
+
+	case codes.Canceled:
+		return context.Canceled
+
+	default:
+		return err
+	}
+}
+
+func (l *lndClient) HtlcNotifier(ctx context.Context) (
+	func() (*routerrpc.HtlcEvent, error), error) {
+
+	stream, err := l.routerClient.SubscribeHtlcEvents(
+		ctx, &routerrpc.SubscribeHtlcEventsRequest{},
+	)
+	if err := mapGrpcError(err); err != nil {
+		return nil, err
+	}
+
+	recv := func() (*routerrpc.HtlcEvent, error) {
+		event, err := stream.Recv()
+		if err := mapGrpcError(err); err != nil {
+			return nil, err
+		}
+
+		return event, nil
+	}
+
+	// Wait for SubscribedEvent which signals that the stream has been
+	// established. This is important to prevent race conditions with
+	// LookupHtlc.
+	firstEvent, err := recv()
+	if err != nil {
+		return nil, err
+	}
+
+	_, ok := firstEvent.Event.(*routerrpc.HtlcEvent_SubscribedEvent)
+	if !ok {
+		return nil, errors.New("stream did not start with subscribed event")
+	}
+
+	return recv, nil
+}
+
+func (l *lndClient) LookupHtlc(ctx context.Context, key types.CircuitKey) (
+	bool, error) {
+
+	resp, err := l.lnClient.LookupHtlcResolution(ctx,
+		&lnrpc.LookupHtlcResolutionRequest{
+			ChanId:    key.ChanID,
+			HtlcIndex: key.HtlcID,
+		},
+	)
+	switch {
+	case status.Code(err) == codes.NotFound:
+		return false, ErrHtlcNotFound
+
+	case err != nil:
+		return false, err
+	}
+
+	return resp.Settled, nil
 }

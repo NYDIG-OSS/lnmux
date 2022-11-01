@@ -837,9 +837,6 @@ func (i *InvoiceRegistry) requestSettle(set htlcSet) error {
 		i.notifyHodlSubscribers(key, htlcSettleResolution)
 	})
 
-	// TODO: Wait for final settle event from lnd. Unfortunately this
-	// event is not yet implemented.
-
 	return nil
 }
 

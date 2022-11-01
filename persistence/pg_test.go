@@ -62,6 +62,10 @@ func TestSettleInvoice(t *testing.T) {
 		},
 	}, htlcs))
 
+	pendingHtlcs, err := persister.GetPendingHtlcs(context.Background(), nodeKey)
+	require.NoError(t, err)
+	require.Len(t, pendingHtlcs, 2)
+
 	_, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
 		ChanID: 99,
@@ -100,6 +104,10 @@ func TestSettleInvoice(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, htlcs, 2)
 	require.True(t, invoice.Settled)
+
+	pendingHtlcs, err = persister.GetPendingHtlcs(context.Background(), nodeKey)
+	require.NoError(t, err)
+	require.Empty(t, pendingHtlcs)
 }
 
 func TestConcurrentHtlcSettle(t *testing.T) {

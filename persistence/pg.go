@@ -153,6 +153,38 @@ func (p *PostgresPersister) GetInvoices(ctx context.Context,
 	return invoices, nil
 }
 
+// GetPendingHtlcs returns all htlcs for a node that are requested to be
+// settled, but not yet settled.
+func (p *PostgresPersister) GetPendingHtlcs(ctx context.Context, node common.PubKey) (
+	map[types.CircuitKey]struct{}, error) {
+
+	var htlcs = make(map[types.CircuitKey]struct{})
+	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		var dbHtlcs []*dbHtlc
+		err := tx.ModelContext(ctx, &dbHtlcs).
+			Where("node=?", node).
+			Where("settled=?", false).
+			Select()
+		if err != nil {
+			return err
+		}
+
+		for _, htlc := range dbHtlcs {
+			htlcs[types.CircuitKey{
+				ChanID: htlc.ChanID,
+				HtlcID: htlc.HtlcID,
+			}] = struct{}{}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return htlcs, nil
+}
+
 func (p *PostgresPersister) RequestSettle(ctx context.Context,
 	invoice *InvoiceCreationData, htlcs map[types.HtlcKey]int64) error {
 
