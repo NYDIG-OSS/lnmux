@@ -42,11 +42,13 @@ var (
 )
 
 type testLndClient struct {
-	client       *lnd.MockLndClient
-	htlcChan     chan *routerrpc.ForwardHtlcInterceptRequest
-	responseChan chan *routerrpc.ForwardHtlcInterceptResponse
-	blockChan    chan *chainrpc.BlockEpoch
-	closeChan    chan struct{}
+	client               *lnd.MockLndClient
+	htlcChan             chan *routerrpc.ForwardHtlcInterceptRequest
+	responseChan         chan *routerrpc.ForwardHtlcInterceptResponse
+	blockChan            chan *chainrpc.BlockEpoch
+	closeInterceptorChan chan struct{}
+	closeNotifierChan    chan struct{}
+	finalChan            chan *routerrpc.HtlcEvent
 }
 
 func createTestLndClient(ctrl *gomock.Controller,
@@ -57,7 +59,28 @@ func createTestLndClient(ctrl *gomock.Controller,
 
 	htlcChan := make(chan *routerrpc.ForwardHtlcInterceptRequest)
 	responseChan := make(chan *routerrpc.ForwardHtlcInterceptResponse, 1)
-	closeChan := make(chan struct{})
+	closeInterceptorChan := make(chan struct{})
+	closeNotifierChan := make(chan struct{})
+	finalChan := make(chan *routerrpc.HtlcEvent)
+
+	lndClient.EXPECT().HtlcNotifier(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (func() (*routerrpc.HtlcEvent, error), error) {
+			recv := func() (*routerrpc.HtlcEvent, error) {
+				select {
+				case event := <-finalChan:
+					return event, nil
+
+				case <-ctx.Done():
+					return nil, ctx.Err()
+
+				case <-closeNotifierChan:
+					return nil, errors.New("connection closed")
+				}
+			}
+
+			return recv, nil
+		}).AnyTimes()
+
 	lndClient.EXPECT().HtlcInterceptor(gomock.Any()).
 		DoAndReturn(func(ctx context.Context) (
 			func(*routerrpc.ForwardHtlcInterceptResponse) error,
@@ -77,7 +100,7 @@ func createTestLndClient(ctrl *gomock.Controller,
 					case <-ctx.Done():
 						return nil, ctx.Err()
 
-					case <-closeChan:
+					case <-closeInterceptorChan:
 						return nil, errors.New("connection closed")
 					}
 				},
@@ -89,11 +112,24 @@ func createTestLndClient(ctrl *gomock.Controller,
 		Return(blockChan, nil, nil).AnyTimes()
 
 	return &testLndClient{
-		client:       lndClient,
-		htlcChan:     htlcChan,
-		responseChan: responseChan,
-		blockChan:    blockChan,
-		closeChan:    closeChan,
+		client:               lndClient,
+		htlcChan:             htlcChan,
+		responseChan:         responseChan,
+		blockChan:            blockChan,
+		closeInterceptorChan: closeInterceptorChan,
+		closeNotifierChan:    closeNotifierChan,
+		finalChan:            finalChan,
+	}
+}
+
+func (t *testLndClient) notifyFinal(htlcID uint64) {
+	t.finalChan <- &routerrpc.HtlcEvent{
+		IncomingHtlcId: htlcID,
+		Event: &routerrpc.HtlcEvent_FinalHtlcEvent{
+			FinalHtlcEvent: &routerrpc.FinalHtlcEvent{
+				Settled: true,
+			},
+		},
 	}
 }
 
@@ -175,7 +211,8 @@ func TestMux(t *testing.T) {
 			Lnd:             lnd,
 			Logger:          logger.Sugar(),
 			Registry:        registry,
-			SettledHandler:  settledHandler,
+			SettledCallback: settledHandler.InvoiceSettled,
+			Persister:       db,
 			RoutingPolicy:   routingPolicy,
 		})
 		require.NoError(t, err)
@@ -316,7 +353,8 @@ func TestMux(t *testing.T) {
 		types.ErrInvoiceNotFound)
 
 	// Disconnect htlc interceptor.
-	l[0].closeChan <- struct{}{}
+	l[0].closeNotifierChan <- struct{}{}
+	l[0].closeInterceptorChan <- struct{}{}
 
 	// Wait for disconnect to be processed.
 	time.Sleep(time.Second)
@@ -326,6 +364,9 @@ func TestMux(t *testing.T) {
 
 	// Expect a settle signal for node 2.
 	expectResponse(<-l[1].responseChan, 2, routerrpc.ResolveHoldForwardAction_SETTLE)
+
+	// Notify final htlc resolution for htlc 2 on node 2.
+	l[1].notifyFinal(2)
 
 	// Wait for invoice-level settle signal.
 	settledChan := make(chan struct{})
@@ -345,6 +386,9 @@ func TestMux(t *testing.T) {
 
 	// Expect the other htlc to be settled on node 1 now.
 	expectResponse(<-l[0].responseChan, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
+
+	// Notify final htlc resolution for htlc 1 on node 1.
+	l[0].notifyFinal(1)
 
 	// Also the settle event is expected now.
 	<-settledChan
@@ -388,6 +432,9 @@ func TestMux(t *testing.T) {
 	require.NoError(t, registry.RequestSettle(testHash, setID))
 
 	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_SETTLE)
+
+	// Notify final htlc resolution for htlc 20 on node 1.
+	l[0].notifyFinal(20)
 
 	// Waiting for settle again should return immediately with success.
 	require.NoError(t, settledHandler.WaitForInvoiceSettled(

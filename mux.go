@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/bottlepay/lnmux/lnd"
+	"github.com/bottlepay/lnmux/persistence"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/chaincfg"
 	sphinx "github.com/lightningnetwork/lightning-onion"
@@ -26,7 +27,7 @@ type Mux struct {
 	lnd    lnd.LndClient
 	logger *zap.SugaredLogger
 
-	settledHandler *SettledHandler
+	settledHandler *NodeSettledHandler
 	routingPolicy  RoutingPolicy
 
 	virtualChannel uint64
@@ -35,7 +36,8 @@ type Mux struct {
 type MuxConfig struct {
 	KeyRing         keychain.SecretKeyRing
 	ActiveNetParams *chaincfg.Params
-	SettledHandler  *SettledHandler
+	SettledCallback func(lntypes.Hash)
+	Persister       *persistence.PostgresPersister
 
 	Lnd      lnd.LndClient
 	Logger   *zap.SugaredLogger
@@ -80,12 +82,21 @@ func New(cfg *MuxConfig) (*Mux,
 
 	virtualChannel := virtualChannelFromNode(connectedNode)
 
+	settledHandlerCfg := &NodeSettledHandlerConfig{
+		Persister:       cfg.Persister,
+		Logger:          cfg.Logger,
+		Lnd:             cfg.Lnd,
+		SettledCallback: cfg.SettledCallback,
+	}
+
+	settledHandler := NewNodeSettledHandler(settledHandlerCfg)
+
 	return &Mux{
 		registry:       cfg.Registry,
 		sphinx:         sphinx,
 		lnd:            cfg.Lnd,
 		logger:         logger,
-		settledHandler: cfg.SettledHandler,
+		settledHandler: settledHandler,
 		routingPolicy:  cfg.RoutingPolicy,
 		virtualChannel: virtualChannel,
 	}, nil
@@ -129,7 +140,6 @@ func (p *Mux) Run(mainCtx context.Context) error {
 
 	interceptor := newInterceptor(
 		p.lnd, p.logger, htlcChan, heightChan,
-		p.settledHandler.preSendHandler,
 	)
 
 	wg.Add(1)
@@ -137,6 +147,13 @@ func (p *Mux) Run(mainCtx context.Context) error {
 		defer wg.Done()
 
 		interceptor.run(ctx)
+	}(ctx)
+
+	wg.Add(1)
+	go func(ctx context.Context) {
+		defer wg.Done()
+
+		p.settledHandler.Run(ctx)
 	}(ctx)
 
 	// All connected lnd nodes will immediately send the current block height.

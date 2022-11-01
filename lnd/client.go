@@ -6,12 +6,15 @@ import (
 	"fmt"
 
 	"github.com/bottlepay/lnmux/common"
+	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/chainrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 //go:generate mockgen --destination=mock_lnd_client.go --self_package=github.com/bottlepay/lnmux/lnd --package=lnd github.com/bottlepay/lnmux/lnd LndClient
@@ -29,6 +32,11 @@ type LndClient interface {
 		func(*routerrpc.ForwardHtlcInterceptResponse) error,
 		func() (*routerrpc.ForwardHtlcInterceptRequest, error),
 		error)
+
+	HtlcNotifier(ctx context.Context) (
+		func() (*routerrpc.HtlcEvent, error), error)
+
+	LookupHtlc(ctx context.Context, key types.CircuitKey) (bool, error)
 }
 
 type lndClient struct {
@@ -166,4 +174,73 @@ func (l *lndClient) HtlcInterceptor(ctx context.Context) (
 	}
 
 	return stream.Send, stream.Recv, nil
+}
+
+func (l *lndClient) HtlcNotifier(ctx context.Context) (
+	func() (*routerrpc.HtlcEvent, error), error) {
+
+	stream, err := l.routerClient.SubscribeHtlcEvents(
+		ctx, &routerrpc.SubscribeHtlcEventsRequest{},
+	)
+
+	// TODO: Move this err mapping to a helper?
+	switch status.Code(err) {
+	case codes.OK:
+
+	case codes.DeadlineExceeded:
+		return nil, context.DeadlineExceeded
+
+	case codes.Canceled:
+		return nil, context.Canceled
+
+	default:
+		return nil, err
+	}
+
+	recv := func() (*routerrpc.HtlcEvent, error) {
+		event, err := stream.Recv()
+		switch status.Code(err) {
+		case codes.OK:
+
+		case codes.DeadlineExceeded:
+			return nil, context.DeadlineExceeded
+
+		case codes.Canceled:
+			return nil, context.Canceled
+
+		default:
+			return nil, err
+		}
+
+		return event, nil
+	}
+
+	// Wait for SubscribedEvent which signals that the stream has been
+	// established. This is important to prevent race conditions with
+	// LookupHtlc.
+	firstEvent, err := recv()
+	if err != nil {
+		return nil, err
+	}
+
+	_, ok := firstEvent.Event.(*routerrpc.HtlcEvent_SubscribedEvent)
+	if !ok {
+		return nil, errors.New("stream did not start with subscribed event")
+	}
+
+	return recv, nil
+}
+
+func (l *lndClient) LookupHtlc(ctx context.Context, key types.CircuitKey) (
+	bool, error) {
+
+	resp, err := l.lnClient.LookupHtlc(ctx, &lnrpc.LookupHtlcRequest{
+		ChanId:    key.ChanID,
+		HtlcIndex: key.HtlcID,
+	})
+	if err != nil {
+		return false, err
+	}
+
+	return resp.Settled, nil
 }
