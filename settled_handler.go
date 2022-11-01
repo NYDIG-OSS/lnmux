@@ -47,7 +47,13 @@ func (p *SettledHandler) preSendHandler(ctx context.Context, node common.PubKey,
 	}
 
 	invoiceSettled, err := p.persister.MarkHtlcSettled(ctx, htlcKey)
-	if err != nil {
+	switch {
+	// If htlc is already marked as settled, exit early. This can happen when
+	// the settle instruction didn't reach lnd in a previous run.
+	case err == persistence.ErrHtlcAlreadySettled:
+		return nil
+
+	case err != nil:
 		return err
 	}
 

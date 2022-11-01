@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/lightningnetwork/lnd/lnwire"
 	"go.uber.org/zap"
 )
+
+var ErrHtlcAlreadySettled = errors.New("htlc already settled")
 
 type Invoice struct {
 	InvoiceCreationData
@@ -175,12 +178,10 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			HtlcID: key.HtlcID,
 		}
 
-		result, err := tx.ModelContext(ctx, &htlc).
+		// Check to see if htlc exists.
+		err := tx.ModelContext(ctx, &htlc).
 			WherePK().
-			Set("settled=?", true).
-			Set("settled_at=?", now).
-			Returning("hash").
-			Update() // nolint:contextcheck
+			Select() // nolint:contextcheck
 		switch {
 		case err == pg.ErrNoRows:
 			return types.ErrHtlcNotFound
@@ -189,8 +190,25 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			return err
 		}
 
+		// Return an error if it is already settled.
+		if htlc.Settled {
+			return ErrHtlcAlreadySettled
+		}
+
+		// Save hash for this htlc.
 		hash := htlc.Hash
 
+		// Mark htlc as settled.
+		result, err := tx.ModelContext(ctx, &htlc).
+			WherePK().
+			Set("settled=?", true).
+			Set("settled_at=?", now).
+			Update() // nolint:contextcheck
+		if err != nil {
+			return err
+		}
+
+		// Count number of htlcs that are not yet settled.
 		count, err := tx.ModelContext(ctx, (*dbHtlc)(nil)).
 			Where("hash=?", hash).
 			Where("settled=?", false).

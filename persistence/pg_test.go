@@ -77,13 +77,12 @@ func TestSettleInvoice(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, invoiceSettled)
 
-	invoiceSettled, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
+	_, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
 		ChanID: 10,
 		HtlcID: 11,
 	})
-	require.NoError(t, err)
-	require.False(t, invoiceSettled)
+	require.Error(t, err, ErrHtlcAlreadySettled)
 
 	invoice, _, err := persister.Get(context.Background(), hash)
 	require.NoError(t, err)
