@@ -199,21 +199,23 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			return err
 		}
 
-		if count == 0 {
-			_, err := tx.ModelContext(ctx, (*dbInvoice)(nil)).
-				Where("hash=?", hash).
-				Set("settled=?", true).
-				Set("settled_at=?", now).
-				Update() // nolint:contextcheck
-			if err != nil {
-				return err
-			}
-			if result.RowsAffected() == 0 {
-				return types.ErrInvoiceNotFound
-			}
-
-			invoiceSettled = true
+		if count != 0 {
+			return nil
 		}
+
+		_, err = tx.ModelContext(ctx, (*dbInvoice)(nil)).
+			Where("hash=?", hash).
+			Set("settled=?", true).
+			Set("settled_at=?", now).
+			Update() // nolint:contextcheck
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			return types.ErrInvoiceNotFound
+		}
+
+		invoiceSettled = true
 
 		return nil
 	})
