@@ -47,11 +47,12 @@ type dbInvoice struct {
 type dbHtlc struct {
 	tableName struct{} `pg:"lnmux.htlcs,discard_unknown_columns"` // nolint
 
-	Node       common.PubKey `pg:"node,use_zero"`
-	Hash       lntypes.Hash  `pg:"hash,use_zero"`
-	ChanID     uint64        `pg:"chan_id,use_zero,pk"`
-	HtlcID     uint64        `pg:"htlc_id,use_zero,pk"`
-	AmountMsat int64         `pg:"amount_msat,use_zero"`
+	Node   common.PubKey `pg:"node,use_zero,pk"`
+	ChanID uint64        `pg:"chan_id,use_zero,pk"`
+	HtlcID uint64        `pg:"htlc_id,use_zero,pk"`
+
+	Hash       lntypes.Hash `pg:"hash,use_zero"`
+	AmountMsat int64        `pg:"amount_msat,use_zero"`
 
 	SettleRequestedAt time.Time `pg:"settle_requested_at"`
 
