@@ -28,7 +28,7 @@ type htlcReleaseEvent struct {
 	eventBase
 
 	// key is the circuit key of the htlc to release.
-	key types.CircuitKey
+	key types.HtlcKey
 }
 
 // Less is used to order PriorityQueueItem's by their release time such that

@@ -8,7 +8,7 @@ import (
 type htlcSets interface {
 	get(hash lntypes.Hash) (htlcSet, bool)
 	forEach(cb func(htlcSet))
-	add(set *htlcSetParameters, htlcKey types.CircuitKey, htlcAmt int64) htlcSet
+	add(set *htlcSetParameters, htlcKey types.HtlcKey, htlcAmt int64) htlcSet
 }
 
 type htlcSetsImpl struct {
@@ -28,7 +28,7 @@ type htlcSetParameters struct {
 }
 
 // add adds a new htlc set and the first accepted htlc for that set.
-func (h *htlcSetsImpl) add(set *htlcSetParameters, htlcKey types.CircuitKey,
+func (h *htlcSetsImpl) add(set *htlcSetParameters, htlcKey types.HtlcKey,
 	htlcAmt int64) htlcSet {
 
 	hash := set.preimage.Hash()

@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 
+	"github.com/bottlepay/lnmux/common"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwire"
 )
@@ -51,4 +52,15 @@ type CircuitKey struct {
 // String returns a string representation of the CircuitKey.
 func (k CircuitKey) String() string {
 	return fmt.Sprintf("%d:%d", k.ChanID, k.HtlcID)
+}
+
+type HtlcKey struct {
+	Node   common.PubKey
+	ChanID uint64
+	HtlcID uint64
+}
+
+// String returns a string representation of the HtlcKey.
+func (k HtlcKey) String() string {
+	return fmt.Sprintf("%v:%d:%d", k.Node, k.ChanID, k.HtlcID)
 }

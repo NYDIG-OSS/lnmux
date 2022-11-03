@@ -106,7 +106,7 @@ type InvoiceRegistry struct {
 
 	// subscriptions is a map from a circuit key to a list of subscribers.
 	// It is used for efficient notification of links.
-	hodlSubscriptions map[types.CircuitKey][]func(HtlcResolution)
+	hodlSubscriptions map[types.HtlcKey][]func(HtlcResolution)
 
 	sets              htlcSets
 	htlcChan          chan *registryHtlc
@@ -133,7 +133,7 @@ func NewRegistry(cdb *persistence.PostgresPersister,
 
 	return &InvoiceRegistry{
 		cdb:                             cdb,
-		hodlSubscriptions:               make(map[types.CircuitKey][]func(HtlcResolution)),
+		hodlSubscriptions:               make(map[types.HtlcKey][]func(HtlcResolution)),
 		cfg:                             cfg,
 		sets:                            newHtlcSets(),
 		htlcChan:                        make(chan *registryHtlc),
@@ -349,7 +349,7 @@ func (i *InvoiceRegistry) handleCancelRequest(ctx context.Context,
 
 	// Delete in-memory record for this invoice. Only open invoices are
 	// kept in memory.
-	set.deleteAll(func(key types.CircuitKey) {
+	set.deleteAll(func(key types.HtlcKey) {
 		// Notify subscribers that the htlcs should be settled
 		// with our peer.
 		resolution := NewFailResolution(
@@ -418,7 +418,7 @@ func (i *InvoiceRegistry) getAcceptedSet(ctx context.Context, hash lntypes.Hash,
 		}
 
 		// Invoice is in the database. Check if the set id matches.
-		var keys []types.CircuitKey
+		var keys []types.HtlcKey
 		for key := range htlcs {
 			keys = append(keys, key)
 		}
@@ -494,7 +494,7 @@ func (i *InvoiceRegistry) failInvoice(hash lntypes.Hash) error {
 	}
 
 	// Cancel all accepted htlcs.
-	set.deleteAll(func(key types.CircuitKey) {
+	set.deleteAll(func(key types.HtlcKey) {
 		i.notifyHodlSubscribers(key, NewFailResolution(ResultAcceptTimeout))
 	})
 
@@ -521,7 +521,7 @@ func (i *InvoiceRegistry) startAcceptTimer(hash lntypes.Hash) {
 // startHtlcTimer starts a new timer via the invoice registry main loop that
 // cancels a single htlc on an invoice when the htlc hold duration has passed.
 func (i *InvoiceRegistry) startHtlcTimer(hash lntypes.Hash,
-	key types.CircuitKey, releaseTime time.Time) {
+	key types.HtlcKey, releaseTime time.Time) {
 
 	event := &htlcReleaseEvent{
 		eventBase: eventBase{
@@ -546,7 +546,7 @@ func (i *InvoiceRegistry) startHtlcTimer(hash lntypes.Hash,
 // a resolution result which will be used to notify subscribed links and
 // resolvers of the details of the htlc cancellation.
 func (i *InvoiceRegistry) cancelSingleHtlc(hash lntypes.Hash,
-	key types.CircuitKey, result FailResolutionResult) {
+	key types.HtlcKey, result FailResolutionResult) {
 
 	// Do nothing if the set has already been settled.
 	set, ok := i.sets.get(hash)
@@ -594,7 +594,7 @@ type registryHtlc struct {
 	amtPaid       lnwire.MilliSatoshi
 	expiry        uint32
 	currentHeight int32
-	circuitKey    types.CircuitKey
+	circuitKey    types.HtlcKey
 	payload       Payload
 	resolve       func(HtlcResolution)
 }
@@ -834,7 +834,7 @@ type InvoiceUpdate struct {
 func (i *InvoiceRegistry) requestSettle(set htlcSet) error {
 	// Delete in-memory record for this invoice. Only open invoices are
 	// kept in memory.
-	set.deleteAll(func(key types.CircuitKey) {
+	set.deleteAll(func(key types.HtlcKey) {
 		// Notify subscribers that the htlcs should be settled
 		// with our peer.
 		htlcSettleResolution := NewSettleResolution(
@@ -879,7 +879,7 @@ func (i *InvoiceRegistry) markSettleRequested(ctx context.Context,
 
 // notifyHodlSubscribers sends out the htlc resolution to all current
 // subscribers.
-func (i *InvoiceRegistry) notifyHodlSubscribers(key types.CircuitKey,
+func (i *InvoiceRegistry) notifyHodlSubscribers(key types.HtlcKey,
 	htlcResolution HtlcResolution) {
 
 	subscribers, ok := i.hodlSubscriptions[key]
@@ -899,7 +899,7 @@ func (i *InvoiceRegistry) notifyHodlSubscribers(key types.CircuitKey,
 
 // hodlSubscribe adds a new invoice subscription.
 func (i *InvoiceRegistry) hodlSubscribe(subscriber func(HtlcResolution),
-	circuitKey types.CircuitKey) {
+	circuitKey types.HtlcKey) {
 
 	i.logger.Debugf("Hodl subscribe for %v", circuitKey)
 
