@@ -15,7 +15,6 @@ CREATE TABLE invoices
 CREATE TABLE htlcs
 (
         "settle_requested_at"   TIMESTAMPTZ,
-        "node"                  BYTEA           NOT NULL CHECK (LENGTH(node) = 33),
         "hash"                  BYTEA           NOT NULL CHECK (LENGTH(hash) = 32),
         "chan_id"               BIGINT          NOT NULL,
         "htlc_id"               BIGINT          NOT NULL,
@@ -23,7 +22,7 @@ CREATE TABLE htlcs
         "settled"               BOOLEAN         NOT NULL DEFAULT FALSE,
         "settled_at"            TIMESTAMPTZ,
         
-        PRIMARY KEY (node, chan_id, htlc_id),
+        PRIMARY KEY (chan_id, htlc_id),
 
         CONSTRAINT fk_hash FOREIGN KEY(hash) REFERENCES invoices(hash) ON DELETE CASCADE
 );
