@@ -16,6 +16,8 @@ import (
 // construction means that all key derivation will be protected under the root
 // seed of the wallet, making each derived key fully deterministic.
 type KeyRing struct {
+	keychain.SecretKeyRing
+
 	pubKey  *btcec.PublicKey
 	privKey *btcec.PrivateKey
 }
