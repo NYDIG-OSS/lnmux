@@ -170,6 +170,14 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 	var invoiceSettled bool
 
 	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		// Lock table to prevent a race condition where multiple htlcs are
+		// marked as settled at the same time and none concludes that the
+		// invoice is settled.
+		_, err := tx.Exec("LOCK TABLE lnmux.htlcs IN SHARE ROW EXCLUSIVE MODE")
+		if err != nil {
+			return err
+		}
+
 		now := time.Now().UTC()
 
 		htlc := dbHtlc{
@@ -179,7 +187,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 		}
 
 		// Check to see if htlc exists.
-		err := tx.ModelContext(ctx, &htlc).
+		err = tx.ModelContext(ctx, &htlc).
 			WherePK().
 			Select() // nolint:contextcheck
 		switch {
