@@ -9,7 +9,7 @@ import (
 	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 )
 
 func setupTestDB(t *testing.T) (*PostgresPersister, func()) {
@@ -17,7 +17,7 @@ func setupTestDB(t *testing.T) (*PostgresPersister, func()) {
 		MigrationsPath: "./migrations",
 	})
 
-	log := zap.NewNop().Sugar()
+	log := zaptest.NewLogger(t).Sugar()
 	db := NewPostgresPersisterFromOptions(opts, log)
 
 	drop := func() {
