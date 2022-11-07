@@ -9,7 +9,7 @@ import (
 	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 )
 
 func setupTestDB(t *testing.T) (*PostgresPersister, func()) {
@@ -17,7 +17,7 @@ func setupTestDB(t *testing.T) (*PostgresPersister, func()) {
 		MigrationsPath: "./migrations",
 	})
 
-	log := zap.NewNop().Sugar()
+	log := zaptest.NewLogger(t).Sugar()
 	db := NewPostgresPersisterFromOptions(opts, log)
 
 	drop := func() {
@@ -100,4 +100,55 @@ func TestSettleInvoice(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, htlcs, 2)
 	require.True(t, invoice.Settled)
+}
+
+func TestConcurrentHtlcSettle(t *testing.T) {
+	t.Parallel()
+
+	persister, dropDB := setupTestDB(t)
+	defer dropDB()
+
+	preimage := lntypes.Preimage{1}
+
+	nodeKey := common.PubKey{1}
+	htlcs := map[types.HtlcKey]int64{
+		{
+			Node:   nodeKey,
+			ChanID: 10,
+			HtlcID: 11,
+		}: 70,
+		{
+			Node:   nodeKey,
+			ChanID: 11,
+			HtlcID: 12,
+		}: 30,
+	}
+	require.NoError(t, persister.RequestSettle(context.Background(), &InvoiceCreationData{
+		InvoiceCreationData: types.InvoiceCreationData{
+			PaymentPreimage: preimage,
+			Value:           100,
+			PaymentAddr:     [32]byte{2},
+		},
+	}, htlcs))
+
+	settledChan := make(chan bool)
+
+	// Mark both htlcs as settled concurrently.
+	for htlc := range htlcs {
+		htlc := htlc
+
+		go func() {
+			invoiceSettled, err := persister.MarkHtlcSettled(context.Background(), htlc)
+			require.NoError(t, err)
+
+			settledChan <- invoiceSettled
+		}()
+	}
+
+	// We expect at least one of those operations to signal that the invoice is
+	// now settled.
+	settled1 := <-settledChan
+	settled2 := <-settledChan
+
+	require.True(t, settled1 || settled2)
 }
