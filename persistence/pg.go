@@ -90,9 +90,13 @@ func (p *PostgresPersister) Get(ctx context.Context, hash lntypes.Hash) (*Invoic
 	var invoice *Invoice
 
 	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		// Retrieve the invoice and lock it FOR SHARE. This is to prevent an
+		// update occurring before retrieving the htlcs in the next query.
 		var dbInvoice dbInvoice
 		err := tx.ModelContext(ctx, &dbInvoice).
-			Where("hash=?", hash).Select()
+			Where("hash=?", hash).
+			For("SHARE").
+			Select()
 		switch {
 		case err == pg.ErrNoRows:
 			return types.ErrInvoiceNotFound
@@ -164,17 +168,53 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 	})
 }
 
+func (p *PostgresPersister) getHtlcHash(ctx context.Context, tx *pg.Tx,
+	key types.HtlcKey) (lntypes.Hash, error) {
+
+	htlc := dbHtlc{
+		Node:   key.Node,
+		ChanID: key.ChanID,
+		HtlcID: key.HtlcID,
+	}
+
+	err := tx.ModelContext(ctx, &htlc).
+		WherePK().
+		Select() // nolint:contextcheck
+	switch {
+	case err == pg.ErrNoRows:
+		return lntypes.Hash{}, types.ErrHtlcNotFound
+
+	case err != nil:
+		return lntypes.Hash{}, err
+	}
+
+	return htlc.Hash, nil
+}
+
 func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 	key types.HtlcKey) (bool, error) {
 
 	var invoiceSettled bool
 
 	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
-		// Lock table to prevent a race condition where multiple htlcs are
-		// marked as settled at the same time and none concludes that the
-		// invoice is settled.
-		_, err := tx.Exec("LOCK TABLE lnmux.htlcs IN SHARE ROW EXCLUSIVE MODE")
+		// Look up the htlc hash.
+		hash, err := p.getHtlcHash(ctx, tx, key)
 		if err != nil {
+			return err
+		}
+
+		// Select invoice FOR UPDATE to prevent incorrect counts when multiple
+		// htlcs for the same invoice are marked as settled concurrently.
+		var invoice dbInvoice
+		err = tx.ModelContext(ctx, &invoice).
+			Where("hash=?", hash).
+			For("UPDATE").
+			Select()
+		switch {
+		case err == pg.ErrNoRows:
+			return types.ErrInvoiceNotFound
+
+		case err != nil:
 			return err
 		}
 
@@ -186,34 +226,20 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			HtlcID: key.HtlcID,
 		}
 
-		// Check to see if htlc exists.
-		err = tx.ModelContext(ctx, &htlc).
-			WherePK().
-			Select() // nolint:contextcheck
-		switch {
-		case err == pg.ErrNoRows:
-			return types.ErrHtlcNotFound
-
-		case err != nil:
-			return err
-		}
-
-		// Return an error if it is already settled.
-		if htlc.Settled {
-			return ErrHtlcAlreadySettled
-		}
-
-		// Save hash for this htlc.
-		hash := htlc.Hash
-
-		// Mark htlc as settled.
+		// Mark htlc as settled. If the htlc is not found at this point, is must
+		// have been settled already. We were able to retrieve it earlier so it
+		// exists.
 		result, err := tx.ModelContext(ctx, &htlc).
 			WherePK().
+			Where("settled=?", false).
 			Set("settled=?", true).
 			Set("settled_at=?", now).
 			Update() // nolint:contextcheck
 		if err != nil {
 			return err
+		}
+		if result.RowsAffected() == 0 {
+			return ErrHtlcAlreadySettled
 		}
 
 		// Count number of htlcs that are not yet settled.
@@ -229,6 +255,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			return nil
 		}
 
+		// If all htlcs are settled, mark the invoice as settled.
 		_, err = tx.ModelContext(ctx, (*dbInvoice)(nil)).
 			Where("hash=?", hash).
 			Set("settled=?", true).
