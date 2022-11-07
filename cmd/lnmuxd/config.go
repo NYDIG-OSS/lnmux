@@ -135,9 +135,6 @@ type LndConfig struct {
 
 	// Network is the bitcoin network that the connector is running on. Options: mainnet, testnet, regtest.
 	Network string `yaml:"network"`
-
-	// Timeout is a generic time limit waiting for calls to lnd to complete
-	Timeout time.Duration `yaml:"timeout"`
 }
 
 type DbConfig struct {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/bottlepay/lnmux/common"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -49,7 +48,6 @@ type Config struct {
 	LndUrl       string
 	Network      *chaincfg.Params
 	PubKey       common.PubKey
-	Timeout      time.Duration
 
 	Logger *zap.SugaredLogger
 }
@@ -74,8 +72,6 @@ func NewLndClient(ctx context.Context, cfg Config) (LndClient, error) {
 	}
 
 	// Test the lnd connection if it is available.
-	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
-	defer cancel()
 	getInfoResp, err := client.lnClient.GetInfo(ctx, &lnrpc.GetInfoRequest{})
 	if err != nil {
 		logger.Warnw("Node unavailable, skipping parameter check",
@@ -153,10 +149,7 @@ func (l *lndClient) HtlcInterceptor(ctx context.Context) (
 	func() (*routerrpc.ForwardHtlcInterceptRequest, error),
 	error) {
 
-	infoCtx, cancel := context.WithTimeout(ctx, l.cfg.Timeout)
-	defer cancel()
-
-	infoResp, err := l.lnClient.GetInfo(infoCtx, &lnrpc.GetInfoRequest{})
+	infoResp, err := l.lnClient.GetInfo(ctx, &lnrpc.GetInfoRequest{})
 	if err != nil {
 		return nil, nil, err
 	}

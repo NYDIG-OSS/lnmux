@@ -324,7 +324,6 @@ func initLndClients(ctx context.Context, cfg *LndConfig) ([]lnd.LndClient, *chai
 			Logger:       log,
 			PubKey:       pubkey,
 			Network:      network,
-			Timeout:      cfg.Timeout,
 		})
 		if err != nil {
 			return nil, nil, err
