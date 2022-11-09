@@ -226,7 +226,6 @@ func (i *interceptor) htlcReceiveLoop(ctx context.Context,
 
 		select {
 		case i.htlcChan <- &interceptedHtlc{
-			source:             i.pubKey,
 			circuitKey:         circuitKey,
 			hash:               hash,
 			onionBlob:          htlc.OnionBlob,

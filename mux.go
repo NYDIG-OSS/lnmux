@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/bottlepay/lnmux/common"
 	"github.com/bottlepay/lnmux/lnd"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -29,6 +28,8 @@ type Mux struct {
 
 	settledHandler *SettledHandler
 	routingPolicy  RoutingPolicy
+
+	virtualChannel uint64
 }
 
 type MuxConfig struct {
@@ -74,18 +75,23 @@ func New(cfg *MuxConfig) (*Mux,
 
 	sphinx := hop.NewOnionProcessor(sphinxRouter)
 
+	connectedNode := cfg.Lnd.PubKey()
+	logger := cfg.Logger.With("node", connectedNode)
+
+	virtualChannel := virtualChannelFromNode(connectedNode)
+
 	return &Mux{
 		registry:       cfg.Registry,
 		sphinx:         sphinx,
 		lnd:            cfg.Lnd,
-		logger:         cfg.Logger,
+		logger:         logger,
 		settledHandler: cfg.SettledHandler,
 		routingPolicy:  cfg.RoutingPolicy,
+		virtualChannel: virtualChannel,
 	}, nil
 }
 
 type interceptedHtlc struct {
-	source             common.PubKey
 	circuitKey         types.CircuitKey
 	hash               lntypes.Hash
 	onionBlob          []byte
@@ -153,10 +159,8 @@ func (p *Mux) Run(mainCtx context.Context) error {
 			}
 
 		case htlc := <-htlcChan:
-			virtualChannel := virtualChannelFromNode(htlc.source)
-
 			// Only intercept htlcs for the virtual channel.
-			if htlc.outgoingChanID != virtualChannel {
+			if htlc.outgoingChanID != p.virtualChannel {
 				err := htlc.reply(&interceptedHtlcResponse{
 					action: routerrpc.ResolveHoldForwardAction_RESUME,
 				})
@@ -209,7 +213,6 @@ func (p *Mux) ProcessHtlc(
 
 	logger := p.logger.With(
 		"hash", htlc.hash,
-		"source", htlc.source,
 		"circuitKey", htlc.circuitKey,
 	)
 
@@ -354,7 +357,7 @@ func (p *Mux) ProcessHtlc(
 	htlcKey := types.HtlcKey{
 		ChanID: htlc.circuitKey.ChanID,
 		HtlcID: htlc.circuitKey.HtlcID,
-		Node:   htlc.source,
+		Node:   p.lnd.PubKey(),
 	}
 
 	p.registry.NotifyExitHopHtlc(
