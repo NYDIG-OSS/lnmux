@@ -37,6 +37,9 @@ type InvoiceCreationData struct {
 type dbInvoice struct {
 	tableName struct{} `pg:"lnmux.invoices,discard_unknown_columns"` // nolint
 
+	// SequenceNum is a unique identifier used for pagination
+	SequenceNum uint64 `pg:"sequence_num"`
+
 	Hash       lntypes.Hash     `pg:"hash,use_zero,pk"`
 	Preimage   lntypes.Preimage `pg:"preimage,use_zero"`
 	AmountMsat int64            `pg:"amount_msat,use_zero"`
