@@ -7,6 +7,7 @@ import (
 
 	"github.com/bottlepay/lnmux"
 	"github.com/bottlepay/lnmux/lnmuxrpc"
+	"github.com/bottlepay/lnmux/persistence"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/prometheus/client_golang/prometheus"
@@ -29,18 +30,21 @@ type server struct {
 	registry       *lnmux.InvoiceRegistry
 	creator        *lnmux.InvoiceCreator
 	settledHandler *lnmux.SettledHandler
+	cdb            *persistence.PostgresPersister
 
 	lnmuxrpc.UnimplementedServiceServer
 }
 
 func newServer(creator *lnmux.InvoiceCreator,
 	registry *lnmux.InvoiceRegistry,
-	settledHandler *lnmux.SettledHandler) *server {
+	settledHandler *lnmux.SettledHandler,
+	persistence *persistence.PostgresPersister) *server {
 
 	return &server{
 		registry:       registry,
 		creator:        creator,
 		settledHandler: settledHandler,
+		cdb:            persistence,
 	}
 }
 
@@ -293,4 +297,49 @@ func (s *server) CancelInvoice(ctx context.Context,
 	}
 
 	return &lnmuxrpc.CancelInvoiceResponse{}, nil
+}
+
+func (s *server) ListInvoices(ctx context.Context,
+	req *lnmuxrpc.ListInvoicesRequest) (*lnmuxrpc.ListInvoicesResponse, error) {
+
+	if req.MaxInvoicesCount == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "should provide 'max_invoices_count' field")
+	}
+
+	dbInvoices, err := s.cdb.GetInvoices(ctx, int(req.MaxInvoicesCount), int(req.SequenceStart))
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, err.Error())
+	}
+
+	invoices := make([]*lnmuxrpc.Invoice, 0, len(dbInvoices))
+	firstSequenceNum := uint64(0)
+	lastSequenceNum := uint64(0)
+	for i, dbInvoice := range dbInvoices {
+		if i == 0 {
+			firstSequenceNum = dbInvoice.SequenceNum
+		}
+
+		invoices = append(invoices, dbInvoiceToProto(dbInvoice))
+		lastSequenceNum = dbInvoice.SequenceNum
+	}
+
+	return &lnmuxrpc.ListInvoicesResponse{
+		Invoice:             invoices,
+		FirstSequenceNumber: firstSequenceNum,
+		LastSequenceNumber:  lastSequenceNum,
+	}, nil
+}
+
+func dbInvoiceToProto(invoice *persistence.Invoice) *lnmuxrpc.Invoice {
+	preimage := invoice.PaymentPreimage.Hash()
+
+	return &lnmuxrpc.Invoice{
+		Hash:               invoice.PaymentPreimage[:],
+		Preimage:           preimage[:],
+		AmountMsat:         uint64(invoice.InvoiceCreationData.Value),
+		Settled:            invoice.Settled,
+		SettledRequestedAt: uint64(invoice.SettleRequestedAt.Unix()),
+		SettledAt:          uint64(invoice.SettledAt.Unix()),
+		SequenceNumber:     invoice.SequenceNum,
+	}
 }

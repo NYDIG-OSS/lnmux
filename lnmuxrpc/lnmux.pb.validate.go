@@ -951,3 +951,238 @@ var _ interface {
 	Cause() error
 	ErrorName() string
 } = CancelInvoiceResponseValidationError{}
+
+// Validate checks the field values on ListInvoicesRequest with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, an error is returned.
+func (m *ListInvoicesRequest) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	// no validation rules for MaxInvoicesCount
+
+	// no validation rules for SequenceStart
+
+	return nil
+}
+
+// ListInvoicesRequestValidationError is the validation error returned by
+// ListInvoicesRequest.Validate if the designated constraints aren't met.
+type ListInvoicesRequestValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e ListInvoicesRequestValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e ListInvoicesRequestValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e ListInvoicesRequestValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e ListInvoicesRequestValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e ListInvoicesRequestValidationError) ErrorName() string {
+	return "ListInvoicesRequestValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e ListInvoicesRequestValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sListInvoicesRequest.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = ListInvoicesRequestValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = ListInvoicesRequestValidationError{}
+
+// Validate checks the field values on ListInvoicesResponse with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, an error is returned.
+func (m *ListInvoicesResponse) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	for idx, item := range m.GetInvoice() {
+		_, _ = idx, item
+
+		if v, ok := interface{}(item).(interface{ Validate() error }); ok {
+			if err := v.Validate(); err != nil {
+				return ListInvoicesResponseValidationError{
+					field:  fmt.Sprintf("Invoice[%v]", idx),
+					reason: "embedded message failed validation",
+					cause:  err,
+				}
+			}
+		}
+
+	}
+
+	// no validation rules for FirstSequenceNumber
+
+	// no validation rules for LastSequenceNumber
+
+	return nil
+}
+
+// ListInvoicesResponseValidationError is the validation error returned by
+// ListInvoicesResponse.Validate if the designated constraints aren't met.
+type ListInvoicesResponseValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e ListInvoicesResponseValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e ListInvoicesResponseValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e ListInvoicesResponseValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e ListInvoicesResponseValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e ListInvoicesResponseValidationError) ErrorName() string {
+	return "ListInvoicesResponseValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e ListInvoicesResponseValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sListInvoicesResponse.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = ListInvoicesResponseValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = ListInvoicesResponseValidationError{}
+
+// Validate checks the field values on Invoice with the rules defined in the
+// proto definition for this message. If any rules are violated, an error is returned.
+func (m *Invoice) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	// no validation rules for Hash
+
+	// no validation rules for Preimage
+
+	// no validation rules for AmountMsat
+
+	// no validation rules for Settled
+
+	// no validation rules for SettledRequestedAt
+
+	// no validation rules for SettledAt
+
+	// no validation rules for SequenceNumber
+
+	return nil
+}
+
+// InvoiceValidationError is the validation error returned by Invoice.Validate
+// if the designated constraints aren't met.
+type InvoiceValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e InvoiceValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e InvoiceValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e InvoiceValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e InvoiceValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e InvoiceValidationError) ErrorName() string { return "InvoiceValidationError" }
+
+// Error satisfies the builtin error interface
+func (e InvoiceValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sInvoice.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = InvoiceValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = InvoiceValidationError{}
