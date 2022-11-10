@@ -15,7 +15,6 @@ var (
 func init() {
 	Collection.DisableSQLAutodiscover(true)
 	Collection.SetTableName("lnmux.migrations")
-
 }
 
 // DiscoverSQLMigrations scans dir for migrations.

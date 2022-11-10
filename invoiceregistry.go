@@ -271,7 +271,6 @@ func (i *InvoiceRegistry) invoiceEventLoop(ctx context.Context) error {
 		}
 
 		select {
-
 		// The htlc at the top of the heap needs to be auto-released.
 		case <-nextHtlcReleaseTick:
 			head := i.autoReleaseHeap.Pop()

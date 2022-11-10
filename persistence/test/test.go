@@ -32,7 +32,6 @@ func PGTestDSN() string {
 }
 
 func CreatePGTestDB(t *testing.T, settings *TestDBSettings) *pg.Options {
-
 	// To create a DB, we need a connection to the server that isn't to
 	// the nonexistent DB itself. We connect to the postgres DB, which
 	// almost always exists.
@@ -114,5 +113,4 @@ func DropTestDB(t *testing.T, opts pg.Options) {
 	require.NoError(t, err)
 
 	defaultDb.Close()
-
 }

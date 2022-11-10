@@ -70,7 +70,6 @@ func (p *SettledHandler) preSendHandler(ctx context.Context, node common.PubKey,
 		}
 		p.waiters[item.hash] = nil
 		p.waitersLock.Unlock()
-
 	}
 
 	return nil
