@@ -12,11 +12,21 @@ import (
 	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
 	"github.com/lightningnetwork/lnd/lntypes"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
 )
 
 const (
 	resolutionQueueSize = 100
+)
+
+// disconnectedNodesGaugeMetric tracks the number of configured lnd nodes to
+// which we do not have a connection.
+var disconnectedNodesGaugeMetric = promauto.NewGauge(
+	prometheus.GaugeOpts{
+		Name: "lnmux_disconnected_nodes",
+	},
 )
 
 type preSendCallbackFunc func(context.Context, common.PubKey, queuedReply) error
@@ -49,6 +59,12 @@ func newInterceptor(lnd lnd.LndClient, logger *zap.SugaredLogger,
 
 func (i *interceptor) run(ctx context.Context) {
 	defer i.logger.Debugw("Exiting interceptor loop")
+
+	// Start in the disconnected state. We are not supposed to exit this
+	// function unless the process is shutting down. Do not decrement the
+	// counter, so that we never falsely report that there are no disconnected
+	// node.
+	disconnectedNodesGaugeMetric.Inc()
 
 	for {
 		err := i.start(ctx)
@@ -128,6 +144,10 @@ func (i *interceptor) start(ctx context.Context) error {
 			errChan <- err
 		}
 	}(ctx)
+
+	// We consider ourselves connected now.
+	disconnectedNodesGaugeMetric.Dec()
+	defer disconnectedNodesGaugeMetric.Inc()
 
 	for {
 		select {
