@@ -114,7 +114,6 @@ func New(ctx context.Context, cfg *LockConfig) (func(), error) {
 						logger.Infow("Leader status lost, exiting")
 						os.Exit(1)
 					}
-
 				},
 				OnNewLeader: func(identity string) {
 					// We're notified that a new leader
@@ -156,5 +155,4 @@ func New(ctx context.Context, cfg *LockConfig) (func(), error) {
 
 		return nil, ctx.Err()
 	}
-
 }

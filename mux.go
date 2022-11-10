@@ -320,7 +320,6 @@ func (p *Mux) ProcessHtlc(
 		// Determine required action for the resolution based on the type of
 		// resolution we have received.
 		switch res := resolution.(type) {
-
 		case *HtlcSettleResolution:
 			logger.Debugw("Sending settle resolution",
 				"outcome", res.Outcome)

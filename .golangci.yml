@@ -21,6 +21,14 @@ linters-settings:
     rules:
       - name: var-naming
         disabled: true
+  whitespace:
+    # Enforces newlines (or comments) after every multi-line if statement.
+    # Default: false
+    multi-if: true
+
+    # Enforces newlines (or comments) after every multi-line function signature.
+    # Default: false
+    multi-func: true
 
 linters:
   enable:
@@ -46,6 +54,7 @@ linters:
     - nilerr
     - gosec    
     - govet
+    - whitespace
 
 issues:
    exclude-rules:

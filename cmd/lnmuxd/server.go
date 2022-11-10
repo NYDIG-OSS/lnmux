@@ -128,7 +128,6 @@ func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAccepted
 
 	for {
 		select {
-
 		case <-subscription.Context().Done():
 			return nil
 
