@@ -1,0 +1,1 @@
+ALTER TABLE lnmux.invoices ADD "sequence_num" SERIAL UNIQUE;

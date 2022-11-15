@@ -349,6 +349,13 @@ func TestMux(t *testing.T) {
 	// Also the settle event is expected now.
 	<-settledChan
 
+	dbInvoices, err := db.GetInvoices(context.Background(), 3, 0)
+	require.NoError(t, err)
+	require.Len(t, dbInvoices, 1)
+	require.Equal(t, dbInvoices[0].SequenceNum, uint64(1))
+	require.Equal(t, dbInvoices[0].PaymentPreimage, invoice.PaymentPreimage)
+	require.True(t, dbInvoices[0].Settled)
+
 	// Waiting for settle again should return immediately with success.
 	require.NoError(t, settledHandler.WaitForInvoiceSettled(
 		context.Background(), testHash,
@@ -367,13 +374,13 @@ func TestMux(t *testing.T) {
 	expectResponse(<-l[0].responseChan, 10, routerrpc.ResolveHoldForwardAction_FAIL)
 
 	// Create a new invoice.
-	invoice, testPreimage, err = creator.Create(
+	invoice, testPreimage2, err := creator.Create(
 		15000, time.Minute, "test 2", nil, 40,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, invoice)
 
-	testHash = testPreimage.Hash()
+	testHash = testPreimage2.Hash()
 
 	receiveHtlc(0, 20, 15000)
 
@@ -381,6 +388,22 @@ func TestMux(t *testing.T) {
 	require.NoError(t, registry.RequestSettle(testHash, setID))
 
 	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_SETTLE)
+
+	// Waiting for settle again should return immediately with success.
+	require.NoError(t, settledHandler.WaitForInvoiceSettled(
+		context.Background(), testHash,
+	))
+
+	// Should have 2 invoices in the response
+	dbInvoices, err = db.GetInvoices(context.Background(), 3, 0)
+	require.NoError(t, err)
+	require.Len(t, dbInvoices, 2)
+	require.Equal(t, dbInvoices[0].SequenceNum, uint64(1))
+	require.Equal(t, dbInvoices[0].PaymentPreimage, testPreimage)
+	require.True(t, dbInvoices[0].Settled)
+	require.Equal(t, dbInvoices[1].SequenceNum, uint64(2))
+	require.Equal(t, dbInvoices[1].PaymentPreimage, testPreimage2)
+	require.True(t, dbInvoices[1].Settled)
 
 	cancelAcceptSubscription()
 

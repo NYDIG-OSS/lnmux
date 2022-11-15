@@ -19,6 +19,10 @@ service Service {
     // Cancels an accepted invoice. In case settle has been requested
     // for an invoice, CancelInvoice returns a FailedPrecondition error.
     rpc CancelInvoice (CancelInvoiceRequest) returns (CancelInvoiceResponse);
+
+    // Lists settled or to be settled invoices. It returns invoices with a sequence number between
+    // 'sequence_start' and 'sequence_start' + max_invoices_count'.
+    rpc ListInvoices(ListInvoicesRequest)  returns (ListInvoicesResponse);
 }
 
 message GetInfoRequest {}
@@ -73,3 +77,24 @@ message CancelInvoiceRequest {
 }
 
 message CancelInvoiceResponse {}
+
+message ListInvoicesRequest {
+    uint64 max_invoices_count = 1;
+    uint64 sequence_start = 2;
+}
+
+message ListInvoicesResponse {
+    repeated Invoice invoice = 1;
+    uint64 first_sequence_number = 2;
+    uint64 last_sequence_number = 3;
+}
+
+message Invoice {
+    bytes hash = 1;
+    bytes preimage = 2;
+    uint64 amount_msat = 3;
+    bool settled = 4;
+    uint64 settled_requested_at = 5;
+    uint64 settled_at = 6;
+    uint64 sequence_number = 7;
+}

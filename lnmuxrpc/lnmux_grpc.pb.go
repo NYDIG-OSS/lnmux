@@ -27,6 +27,9 @@ type ServiceClient interface {
 	// Cancels an accepted invoice. In case settle has been requested
 	// for an invoice, CancelInvoice returns a FailedPrecondition error.
 	CancelInvoice(ctx context.Context, in *CancelInvoiceRequest, opts ...grpc.CallOption) (*CancelInvoiceResponse, error)
+	// Lists settled or to be settled invoices. It returns invoices with a sequence number between
+	// 'sequence_start' and 'sequence_start' + max_invoices_count'.
+	ListInvoices(ctx context.Context, in *ListInvoicesRequest, opts ...grpc.CallOption) (*ListInvoicesResponse, error)
 }
 
 type serviceClient struct {
@@ -114,6 +117,15 @@ func (c *serviceClient) CancelInvoice(ctx context.Context, in *CancelInvoiceRequ
 	return out, nil
 }
 
+func (c *serviceClient) ListInvoices(ctx context.Context, in *ListInvoicesRequest, opts ...grpc.CallOption) (*ListInvoicesResponse, error) {
+	out := new(ListInvoicesResponse)
+	err := c.cc.Invoke(ctx, "/lnmux.Service/ListInvoices", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ServiceServer is the server API for Service service.
 // All implementations must embed UnimplementedServiceServer
 // for forward compatibility
@@ -127,6 +139,9 @@ type ServiceServer interface {
 	// Cancels an accepted invoice. In case settle has been requested
 	// for an invoice, CancelInvoice returns a FailedPrecondition error.
 	CancelInvoice(context.Context, *CancelInvoiceRequest) (*CancelInvoiceResponse, error)
+	// Lists settled or to be settled invoices. It returns invoices with a sequence number between
+	// 'sequence_start' and 'sequence_start' + max_invoices_count'.
+	ListInvoices(context.Context, *ListInvoicesRequest) (*ListInvoicesResponse, error)
 	mustEmbedUnimplementedServiceServer()
 }
 
@@ -151,6 +166,9 @@ func (UnimplementedServiceServer) SettleInvoice(context.Context, *SettleInvoiceR
 }
 func (UnimplementedServiceServer) CancelInvoice(context.Context, *CancelInvoiceRequest) (*CancelInvoiceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CancelInvoice not implemented")
+}
+func (UnimplementedServiceServer) ListInvoices(context.Context, *ListInvoicesRequest) (*ListInvoicesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListInvoices not implemented")
 }
 func (UnimplementedServiceServer) mustEmbedUnimplementedServiceServer() {}
 
@@ -276,6 +294,24 @@ func _Service_CancelInvoice_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Service_ListInvoices_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListInvoicesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ServiceServer).ListInvoices(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/lnmux.Service/ListInvoices",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ServiceServer).ListInvoices(ctx, req.(*ListInvoicesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Service_ServiceDesc is the grpc.ServiceDesc for Service service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -302,6 +338,10 @@ var Service_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CancelInvoice",
 			Handler:    _Service_CancelInvoice_Handler,
+		},
+		{
+			MethodName: "ListInvoices",
+			Handler:    _Service_ListInvoices_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

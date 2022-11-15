@@ -219,7 +219,7 @@ func run(ctx context.Context, cfg *Config) error {
 	reflection.Register(grpcServer)
 	grpc_prometheus.Register(grpcServer)
 
-	server := newServer(creator, registry, settledHandler)
+	server := newServer(creator, registry, settledHandler, db)
 
 	lnmuxrpc.RegisterServiceServer(
 		grpcServer, server,

@@ -19,7 +19,9 @@ var ErrHtlcAlreadySettled = errors.New("htlc already settled")
 type Invoice struct {
 	InvoiceCreationData
 
+	SequenceNum       uint64
 	SettleRequestedAt time.Time
+	SettledAt         time.Time
 	Settled           bool
 }
 
@@ -36,6 +38,9 @@ type InvoiceCreationData struct {
 
 type dbInvoice struct {
 	tableName struct{} `pg:"lnmux.invoices,discard_unknown_columns"` // nolint
+
+	// SequenceNum is a unique identifier used for pagination
+	SequenceNum uint64 `pg:"sequence_num"`
 
 	Hash       lntypes.Hash     `pg:"hash,use_zero,pk"`
 	Preimage   lntypes.Preimage `pg:"preimage,use_zero"`
@@ -78,7 +83,10 @@ func unmarshallDbInvoice(invoice *dbInvoice) *Invoice {
 				Value:           lnwire.MilliSatoshi(invoice.AmountMsat),
 			},
 		},
-		Settled: invoice.Settled,
+		SequenceNum:       invoice.SequenceNum,
+		Settled:           invoice.Settled,
+		SettleRequestedAt: invoice.SettleRequestedAt,
+		SettledAt:         invoice.SettledAt,
 	}
 }
 
@@ -129,6 +137,27 @@ func (p *PostgresPersister) Get(ctx context.Context, hash lntypes.Hash) (*Invoic
 	}
 
 	return invoice, htlcs, nil
+}
+
+func (p *PostgresPersister) GetInvoices(ctx context.Context,
+	maxInvoicesCount, sequenceStart int) ([]*Invoice, error) {
+
+	var dbInvoices []*dbInvoice
+	err := p.conn.WithContext(ctx).Model(&dbInvoices).
+		Where("sequence_num>=?", sequenceStart).
+		Order("sequence_num ASC").
+		Limit(maxInvoicesCount).
+		Select()
+	if err != nil {
+		return nil, err
+	}
+
+	invoices := make([]*Invoice, len(dbInvoices))
+	for i := 0; i < len(dbInvoices); i++ {
+		invoices[i] = unmarshallDbInvoice(dbInvoices[i])
+	}
+
+	return invoices, nil
 }
 
 func (p *PostgresPersister) RequestSettle(ctx context.Context,
