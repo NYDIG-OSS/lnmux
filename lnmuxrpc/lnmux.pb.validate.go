@@ -33,6 +33,544 @@ var (
 	_ = anypb.Any{}
 )
 
+// Validate checks the field values on GetPendingHtlcsRequest with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, an error is returned.
+func (m *GetPendingHtlcsRequest) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	return nil
+}
+
+// GetPendingHtlcsRequestValidationError is the validation error returned by
+// GetPendingHtlcsRequest.Validate if the designated constraints aren't met.
+type GetPendingHtlcsRequestValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e GetPendingHtlcsRequestValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e GetPendingHtlcsRequestValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e GetPendingHtlcsRequestValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e GetPendingHtlcsRequestValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e GetPendingHtlcsRequestValidationError) ErrorName() string {
+	return "GetPendingHtlcsRequestValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e GetPendingHtlcsRequestValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sGetPendingHtlcsRequest.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = GetPendingHtlcsRequestValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = GetPendingHtlcsRequestValidationError{}
+
+// Validate checks the field values on GetPendingHtlcsResponse with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, an error is returned.
+func (m *GetPendingHtlcsResponse) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	return nil
+}
+
+// GetPendingHtlcsResponseValidationError is the validation error returned by
+// GetPendingHtlcsResponse.Validate if the designated constraints aren't met.
+type GetPendingHtlcsResponseValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e GetPendingHtlcsResponseValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e GetPendingHtlcsResponseValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e GetPendingHtlcsResponseValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e GetPendingHtlcsResponseValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e GetPendingHtlcsResponseValidationError) ErrorName() string {
+	return "GetPendingHtlcsResponseValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e GetPendingHtlcsResponseValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sGetPendingHtlcsResponse.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = GetPendingHtlcsResponseValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = GetPendingHtlcsResponseValidationError{}
+
+// Validate checks the field values on SubscribeResolutionsRequest with the
+// rules defined in the proto definition for this message. If any rules are
+// violated, an error is returned.
+func (m *SubscribeResolutionsRequest) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	return nil
+}
+
+// SubscribeResolutionsRequestValidationError is the validation error returned
+// by SubscribeResolutionsRequest.Validate if the designated constraints
+// aren't met.
+type SubscribeResolutionsRequestValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e SubscribeResolutionsRequestValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e SubscribeResolutionsRequestValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e SubscribeResolutionsRequestValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e SubscribeResolutionsRequestValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e SubscribeResolutionsRequestValidationError) ErrorName() string {
+	return "SubscribeResolutionsRequestValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e SubscribeResolutionsRequestValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sSubscribeResolutionsRequest.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = SubscribeResolutionsRequestValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = SubscribeResolutionsRequestValidationError{}
+
+// Validate checks the field values on SubscribeResolutionsResponse with the
+// rules defined in the proto definition for this message. If any rules are
+// violated, an error is returned.
+func (m *SubscribeResolutionsResponse) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	return nil
+}
+
+// SubscribeResolutionsResponseValidationError is the validation error returned
+// by SubscribeResolutionsResponse.Validate if the designated constraints
+// aren't met.
+type SubscribeResolutionsResponseValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e SubscribeResolutionsResponseValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e SubscribeResolutionsResponseValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e SubscribeResolutionsResponseValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e SubscribeResolutionsResponseValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e SubscribeResolutionsResponseValidationError) ErrorName() string {
+	return "SubscribeResolutionsResponseValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e SubscribeResolutionsResponseValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sSubscribeResolutionsResponse.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = SubscribeResolutionsResponseValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = SubscribeResolutionsResponseValidationError{}
+
+// Validate checks the field values on NotifyHtlcAcceptedRequest with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, an error is returned.
+func (m *NotifyHtlcAcceptedRequest) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	return nil
+}
+
+// NotifyHtlcAcceptedRequestValidationError is the validation error returned by
+// NotifyHtlcAcceptedRequest.Validate if the designated constraints aren't met.
+type NotifyHtlcAcceptedRequestValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e NotifyHtlcAcceptedRequestValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e NotifyHtlcAcceptedRequestValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e NotifyHtlcAcceptedRequestValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e NotifyHtlcAcceptedRequestValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e NotifyHtlcAcceptedRequestValidationError) ErrorName() string {
+	return "NotifyHtlcAcceptedRequestValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e NotifyHtlcAcceptedRequestValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sNotifyHtlcAcceptedRequest.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = NotifyHtlcAcceptedRequestValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = NotifyHtlcAcceptedRequestValidationError{}
+
+// Validate checks the field values on NotifyHtlcAcceptedResponse with the
+// rules defined in the proto definition for this message. If any rules are
+// violated, an error is returned.
+func (m *NotifyHtlcAcceptedResponse) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	return nil
+}
+
+// NotifyHtlcAcceptedResponseValidationError is the validation error returned
+// by NotifyHtlcAcceptedResponse.Validate if the designated constraints aren't met.
+type NotifyHtlcAcceptedResponseValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e NotifyHtlcAcceptedResponseValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e NotifyHtlcAcceptedResponseValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e NotifyHtlcAcceptedResponseValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e NotifyHtlcAcceptedResponseValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e NotifyHtlcAcceptedResponseValidationError) ErrorName() string {
+	return "NotifyHtlcAcceptedResponseValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e NotifyHtlcAcceptedResponseValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sNotifyHtlcAcceptedResponse.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = NotifyHtlcAcceptedResponseValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = NotifyHtlcAcceptedResponseValidationError{}
+
+// Validate checks the field values on NotifyHtlcSettledRequest with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, an error is returned.
+func (m *NotifyHtlcSettledRequest) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	return nil
+}
+
+// NotifyHtlcSettledRequestValidationError is the validation error returned by
+// NotifyHtlcSettledRequest.Validate if the designated constraints aren't met.
+type NotifyHtlcSettledRequestValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e NotifyHtlcSettledRequestValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e NotifyHtlcSettledRequestValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e NotifyHtlcSettledRequestValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e NotifyHtlcSettledRequestValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e NotifyHtlcSettledRequestValidationError) ErrorName() string {
+	return "NotifyHtlcSettledRequestValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e NotifyHtlcSettledRequestValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sNotifyHtlcSettledRequest.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = NotifyHtlcSettledRequestValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = NotifyHtlcSettledRequestValidationError{}
+
+// Validate checks the field values on NotifyHtlcSettledResponse with the rules
+// defined in the proto definition for this message. If any rules are
+// violated, an error is returned.
+func (m *NotifyHtlcSettledResponse) Validate() error {
+	if m == nil {
+		return nil
+	}
+
+	return nil
+}
+
+// NotifyHtlcSettledResponseValidationError is the validation error returned by
+// NotifyHtlcSettledResponse.Validate if the designated constraints aren't met.
+type NotifyHtlcSettledResponseValidationError struct {
+	field  string
+	reason string
+	cause  error
+	key    bool
+}
+
+// Field function returns field value.
+func (e NotifyHtlcSettledResponseValidationError) Field() string { return e.field }
+
+// Reason function returns reason value.
+func (e NotifyHtlcSettledResponseValidationError) Reason() string { return e.reason }
+
+// Cause function returns cause value.
+func (e NotifyHtlcSettledResponseValidationError) Cause() error { return e.cause }
+
+// Key function returns key value.
+func (e NotifyHtlcSettledResponseValidationError) Key() bool { return e.key }
+
+// ErrorName returns error name.
+func (e NotifyHtlcSettledResponseValidationError) ErrorName() string {
+	return "NotifyHtlcSettledResponseValidationError"
+}
+
+// Error satisfies the builtin error interface
+func (e NotifyHtlcSettledResponseValidationError) Error() string {
+	cause := ""
+	if e.cause != nil {
+		cause = fmt.Sprintf(" | caused by: %v", e.cause)
+	}
+
+	key := ""
+	if e.key {
+		key = "key for "
+	}
+
+	return fmt.Sprintf(
+		"invalid %sNotifyHtlcSettledResponse.%s: %s%s",
+		key,
+		e.field,
+		e.reason,
+		cause)
+}
+
+var _ error = NotifyHtlcSettledResponseValidationError{}
+
+var _ interface {
+	Field() string
+	Reason() string
+	Key() bool
+	Cause() error
+	ErrorName() string
+} = NotifyHtlcSettledResponseValidationError{}
+
 // Validate checks the field values on GetInfoRequest with the rules defined in
 // the proto definition for this message. If any rules are violated, an error
 // is returned.

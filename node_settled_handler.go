@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/bottlepay/lnmux/lnd"
-	"github.com/bottlepay/lnmux/persistence"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
 	"github.com/lightningnetwork/lnd/lntypes"
@@ -14,16 +13,14 @@ import (
 )
 
 type NodeSettledHandlerConfig struct {
-	Persister       *persistence.PostgresPersister
 	Logger          *zap.SugaredLogger
 	Lnd             lnd.LndClient
 	SettledCallback func(lntypes.Hash)
 }
 
 type NodeSettledHandler struct {
-	persister *persistence.PostgresPersister
-	logger    *zap.SugaredLogger
-	lnd       lnd.LndClient
+	logger *zap.SugaredLogger
+	lnd    lnd.LndClient
 
 	finalHtlcsChan chan types.CircuitKey
 	newWatchChan   chan types.CircuitKey
@@ -36,7 +33,6 @@ func NewNodeSettledHandler(cfg *NodeSettledHandlerConfig) *NodeSettledHandler {
 
 	return &NodeSettledHandler{
 		logger:          logger,
-		persister:       cfg.Persister,
 		lnd:             cfg.Lnd,
 		finalHtlcsChan:  make(chan types.CircuitKey),
 		newWatchChan:    make(chan types.CircuitKey),
@@ -139,8 +135,8 @@ func (p *NodeSettledHandler) handleFinalHtlc(ctx context.Context,
 
 	settledHash, err := p.persister.MarkHtlcSettled(ctx, htlcKey)
 	switch {
-	case err == persistence.ErrHtlcAlreadySettled:
-		return nil
+	// case err == persistence.ErrHtlcAlreadySettled:
+	// 	return nil
 
 	// If the htlc is not found, the final resolution was for an htlc that isn't
 	// managed by lnmux.

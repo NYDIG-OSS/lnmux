@@ -116,22 +116,17 @@ func (c *Config) GetRoutingPolicy() lnmux.RoutingPolicy {
 }
 
 type LndConfig struct {
-	Nodes []struct {
-		// PubKey is the public key of this node.
-		PubKey string `yaml:"pubKey"`
+	// PubKey is the public key of this node.
+	PubKey string `yaml:"pubKey"`
 
-		// MacaroonPath is the disk path to Bottle's LND node's macaroon file
-		MacaroonPath string `yaml:"macaroonPath"`
+	// MacaroonPath is the disk path to Bottle's LND node's macaroon file
+	MacaroonPath string `yaml:"macaroonPath"`
 
-		// TlsCertPath is the disk path to Bottle's LND's TLS certificate file
-		TlsCertPath string `yaml:"tlsCertPath"`
+	// TlsCertPath is the disk path to Bottle's LND's TLS certificate file
+	TlsCertPath string `yaml:"tlsCertPath"`
 
-		// LndUrl is the URL and port pointing to Bottle's LND node
-		LndUrl string `yaml:"lndUrl"`
-
-		// Priority expressed the preference to use this node. Higher means higher preference.
-		Priority int `yaml:"priority"`
-	} `yaml:"nodes"`
+	// LndUrl is the URL and port pointing to Bottle's LND node
+	LndUrl string `yaml:"lndUrl"`
 
 	// Network is the bitcoin network that the connector is running on. Options: mainnet, testnet, regtest.
 	Network string `yaml:"network"`

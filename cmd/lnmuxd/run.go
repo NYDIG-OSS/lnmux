@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -14,16 +13,11 @@ import (
 
 	"github.com/bottlepay/lnmux"
 	"github.com/bottlepay/lnmux/common"
-	"github.com/bottlepay/lnmux/dlock"
 	"github.com/bottlepay/lnmux/lnd"
-	"github.com/bottlepay/lnmux/lnmuxrpc"
-	"github.com/bottlepay/lnmux/persistence"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/go-pg/pg/v10"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli/v2"
@@ -89,26 +83,10 @@ func initServiceWithLock(address string, lockConfig DistributedLockConfig, run f
 		return instServer.Close()
 	})
 
-	group.Go(func() error {
-		releaseLock, err := initDistributedLock(ctx, &lockConfig)
-		if err != nil {
-			return err
-		}
-		defer releaseLock()
-
-		return run(ctx)
-	})
-
 	return group.Wait()
 }
 
 func run(ctx context.Context, cfg *Config) error {
-	// Setup persistence.
-	db, err := initPersistence(ctx, cfg)
-	if err != nil {
-		return err
-	}
-
 	// Parse lnd connection info from the configuration.
 	lnds, activeNetParams, err := initLndClients(ctx, &cfg.Lnd)
 	if err != nil {
@@ -133,45 +111,6 @@ func run(ctx context.Context, cfg *Config) error {
 
 	// Get routing policy.
 	routingPolicy := cfg.GetRoutingPolicy()
-
-	// Get a new creator instance.
-	var gwPubKeys []common.PubKey
-	for _, lnd := range lnds {
-		gwPubKeys = append(gwPubKeys, lnd.PubKey())
-	}
-	creator, err := lnmux.NewInvoiceCreator(
-		&lnmux.InvoiceCreatorConfig{
-			KeyRing:         keyRing,
-			GwPubKeys:       gwPubKeys,
-			ActiveNetParams: activeNetParams,
-			RoutingPolicy:   routingPolicy,
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	// Instantiate multiplexer.
-	registry := lnmux.NewRegistry(
-		db,
-		&lnmux.RegistryConfig{
-			Clock:                         clock.NewDefaultClock(),
-			FinalCltvRejectDelta:          10,
-			HtlcHoldDuration:              30 * time.Second,
-			AcceptTimeout:                 60 * time.Second,
-			Logger:                        log,
-			PrivKey:                       identityKey,
-			AutoSettle:                    cfg.AutoSettle,
-			GracePeriodWithoutSubscribers: lnmux.DefaultGracePeriodWithoutSubscribers,
-		},
-	)
-
-	settledHandler := lnmux.NewSettledHandler(
-		&lnmux.SettledHandlerConfig{
-			Logger:    log,
-			Persister: db,
-		},
-	)
 
 	// Instantiate grpc server and enable reflection and Prometheus metrics.
 	streamInterceptors := []grpc.StreamServerInterceptor{
@@ -219,70 +158,26 @@ func run(ctx context.Context, cfg *Config) error {
 	reflection.Register(grpcServer)
 	grpc_prometheus.Register(grpcServer)
 
-	server := newServer(creator, registry, settledHandler, db)
-
-	lnmuxrpc.RegisterServiceServer(
-		grpcServer, server,
-	)
-
-	listenAddress := cfg.ListenAddress
-	if listenAddress == "" {
-		listenAddress = DefaultListenAddress
-	}
-
-	grpcInternalListener, err := net.Listen("tcp", listenAddress)
+	// Instantiate multiplexers.
+	mux, err := lnmux.New(
+		&lnmux.MuxConfig{
+			KeyRing:         keyRing,
+			ActiveNetParams: activeNetParams,
+			Lnd:             lnds,
+			Logger:          log,
+			SettledCallback: settledHandler.InvoiceSettled,
+			RoutingPolicy:   routingPolicy,
+		})
 	if err != nil {
 		return err
 	}
 
-	// Instantiate multiplexers.
-	var muxes []*lnmux.Mux
-	for _, lnd := range lnds {
-		mux, err := lnmux.New(
-			&lnmux.MuxConfig{
-				KeyRing:         keyRing,
-				ActiveNetParams: activeNetParams,
-				Lnd:             lnd,
-				Logger:          log,
-				Registry:        registry,
-				Persister:       db,
-				SettledCallback: settledHandler.InvoiceSettled,
-				RoutingPolicy:   routingPolicy,
-			})
-		if err != nil {
-			return err
-		}
-
-		muxes = append(muxes, mux)
-	}
-
 	group, ctx := errgroup.WithContext(ctx)
 
-	// Run registry.
 	group.Go(func() error {
-		return registry.Run(ctx)
-	})
-
-	// Run multiplexers.
-	for _, mux := range muxes {
-		mux := mux
-
-		group.Go(func() error {
-			err := mux.Run(ctx)
-			if err != nil {
-				log.Errorw("mux error", "err", err)
-			}
-
-			return err
-		})
-	}
-
-	// Run grpc server.
-	group.Go(func() error {
-		log.Infow("Grpc server starting", "listenAddress", listenAddress)
-		err := grpcServer.Serve(grpcInternalListener)
-		if err != nil && err != grpc.ErrServerStopped {
-			log.Errorw("grpc server error", "err", err)
+		err := mux.Run(ctx)
+		if err != nil {
+			log.Errorw("mux error", "err", err)
 		}
 
 		return err
@@ -301,44 +196,37 @@ func run(ctx context.Context, cfg *Config) error {
 	return group.Wait()
 }
 
-func initLndClients(ctx context.Context, cfg *LndConfig) ([]lnd.LndClient, *chaincfg.Params, error) {
-	var (
-		nodes []lnd.LndClient
-	)
-
+func initLndClients(ctx context.Context, cfg *LndConfig) (lnd.LndClient, *chaincfg.Params, error) {
 	network, err := network(cfg.Network)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	seenPubKeys := make(map[common.PubKey]struct{})
-	for _, node := range cfg.Nodes {
-		pubkey, err := common.NewPubKeyFromStr(node.PubKey)
-		if err != nil {
-			return nil, nil, fmt.Errorf("cannot parse pubkey %v: %v", node.PubKey, err)
-		}
 
-		lnd, err := lnd.NewLndClient(ctx, lnd.Config{
-			TlsCertPath:  node.TlsCertPath,
-			MacaroonPath: node.MacaroonPath,
-			LndUrl:       node.LndUrl,
-			Logger:       log,
-			PubKey:       pubkey,
-			Network:      network,
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		pubKey := lnd.PubKey()
-		if _, exists := seenPubKeys[pubKey]; exists {
-			return nil, nil, fmt.Errorf("duplicate lnd node: %v", pubKey)
-		}
-		seenPubKeys[pubKey] = struct{}{}
-
-		nodes = append(nodes, lnd)
+	pubkey, err := common.NewPubKeyFromStr(cfg.PubKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot parse pubkey %v: %v", cfg.PubKey, err)
 	}
 
-	return nodes, network, nil
+	lnd, err := lnd.NewLndClient(ctx, lnd.Config{
+		TlsCertPath:  cfg.TlsCertPath,
+		MacaroonPath: cfg.MacaroonPath,
+		LndUrl:       cfg.LndUrl,
+		Logger:       log,
+		PubKey:       pubkey,
+		Network:      network,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	pubKey := lnd.PubKey()
+	if _, exists := seenPubKeys[pubKey]; exists {
+		return nil, nil, fmt.Errorf("duplicate lnd node: %v", pubKey)
+	}
+	seenPubKeys[pubKey] = struct{}{}
+
+	return lnd, network, nil
 }
 
 func network(network string) (*chaincfg.Params, error) {
@@ -355,49 +243,6 @@ func network(network string) (*chaincfg.Params, error) {
 	}
 
 	return nil, fmt.Errorf("unsupported network %v", network)
-}
-
-func initPersistence(ctx context.Context, cfg *Config) (*persistence.PostgresPersister, error) {
-	options, err := pg.ParseURL(cfg.DB.DSN)
-	if err != nil {
-		return nil, err
-	}
-
-	// Apply connection options
-	options.PoolSize = cfg.DB.PoolSize
-	options.MinIdleConns = cfg.DB.MinIdleConns
-	options.MaxConnAge = cfg.DB.MaxConnAge
-	options.PoolTimeout = cfg.DB.PoolTimeout
-	options.IdleTimeout = cfg.DB.IdleTimeout
-
-	// Setup persistence
-	db := persistence.NewPostgresPersisterFromOptions(options, log) //nolint: contextcheck
-	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
-	defer cancel()
-
-	// Ensure we can reach the server
-	if err := db.Ping(ctx); err != nil {
-		return nil, err
-	}
-
-	return db, nil
-}
-
-func initDistributedLock(ctx context.Context, cfg *DistributedLockConfig) (func(), error) {
-	// Do nothing if no lock name is specified.
-	if cfg.Name == "" {
-		log.Infow("Not using leader election")
-
-		return func() {}, nil
-	}
-
-	return dlock.New(ctx, &dlock.LockConfig{
-		Namespace:     cfg.Namespace,
-		Name:          cfg.Name,
-		ID:            cfg.ID,
-		DevKubeConfig: cfg.DevKubeConfig,
-		Logger:        log,
-	})
 }
 
 func initInstrumentationServer(instAddress string) *http.Server {

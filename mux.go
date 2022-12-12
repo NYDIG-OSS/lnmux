@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/bottlepay/lnmux/lnd"
-	"github.com/bottlepay/lnmux/persistence"
 	"github.com/bottlepay/lnmux/types"
 	"github.com/btcsuite/btcd/chaincfg"
 	sphinx "github.com/lightningnetwork/lightning-onion"
@@ -21,8 +20,7 @@ import (
 )
 
 type Mux struct {
-	registry *InvoiceRegistry
-	sphinx   *hop.OnionProcessor
+	sphinx *hop.OnionProcessor
 
 	lnd    lnd.LndClient
 	logger *zap.SugaredLogger
@@ -37,11 +35,9 @@ type MuxConfig struct {
 	KeyRing         keychain.SecretKeyRing
 	ActiveNetParams *chaincfg.Params
 	SettledCallback func(lntypes.Hash)
-	Persister       *persistence.PostgresPersister
 
-	Lnd      lnd.LndClient
-	Logger   *zap.SugaredLogger
-	Registry *InvoiceRegistry
+	Lnd    lnd.LndClient
+	Logger *zap.SugaredLogger
 
 	// RoutingPolicy is the policy that is enforced for the hop towards the
 	// virtual channel.
@@ -83,7 +79,6 @@ func New(cfg *MuxConfig) (*Mux,
 	virtualChannel := virtualChannelFromNode(connectedNode)
 
 	settledHandlerCfg := &NodeSettledHandlerConfig{
-		Persister:       cfg.Persister,
 		Logger:          cfg.Logger,
 		Lnd:             cfg.Lnd,
 		SettledCallback: cfg.SettledCallback,
@@ -92,7 +87,6 @@ func New(cfg *MuxConfig) (*Mux,
 	settledHandler := NewNodeSettledHandler(settledHandlerCfg)
 
 	return &Mux{
-		registry:       cfg.Registry,
 		sphinx:         sphinx,
 		lnd:            cfg.Lnd,
 		logger:         logger,

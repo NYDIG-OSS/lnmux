@@ -16,7 +16,6 @@ func main() {
 	app := &cli.App{
 		Name: "lnmuxd",
 		Commands: []*cli.Command{
-			migrateCommand,
 			runCommand,
 		},
 		Flags: []cli.Flag{

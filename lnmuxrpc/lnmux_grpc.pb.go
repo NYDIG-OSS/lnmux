@@ -30,6 +30,11 @@ type ServiceClient interface {
 	// Lists settled or to be settled invoices. It returns invoices with a sequence number between
 	// 'sequence_start' and 'sequence_start' + max_invoices_count'.
 	ListInvoices(ctx context.Context, in *ListInvoicesRequest, opts ...grpc.CallOption) (*ListInvoicesResponse, error)
+	// Node sidecar RPCs
+	SubscribeResolutions(ctx context.Context, in *SubscribeResolutionsRequest, opts ...grpc.CallOption) (Service_SubscribeResolutionsClient, error)
+	GetPendingHtlcs(ctx context.Context, in *GetPendingHtlcsRequest, opts ...grpc.CallOption) (*GetPendingHtlcsResponse, error)
+	NotifyHtlcAccepted(ctx context.Context, in *NotifyHtlcAcceptedRequest, opts ...grpc.CallOption) (*NotifyHtlcAcceptedResponse, error)
+	NotifyHtlcSettled(ctx context.Context, in *NotifyHtlcSettledRequest, opts ...grpc.CallOption) (*NotifyHtlcSettledResponse, error)
 }
 
 type serviceClient struct {
@@ -126,6 +131,65 @@ func (c *serviceClient) ListInvoices(ctx context.Context, in *ListInvoicesReques
 	return out, nil
 }
 
+func (c *serviceClient) SubscribeResolutions(ctx context.Context, in *SubscribeResolutionsRequest, opts ...grpc.CallOption) (Service_SubscribeResolutionsClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Service_ServiceDesc.Streams[1], "/lnmux.Service/SubscribeResolutions", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &serviceSubscribeResolutionsClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Service_SubscribeResolutionsClient interface {
+	Recv() (*SubscribeResolutionsResponse, error)
+	grpc.ClientStream
+}
+
+type serviceSubscribeResolutionsClient struct {
+	grpc.ClientStream
+}
+
+func (x *serviceSubscribeResolutionsClient) Recv() (*SubscribeResolutionsResponse, error) {
+	m := new(SubscribeResolutionsResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *serviceClient) GetPendingHtlcs(ctx context.Context, in *GetPendingHtlcsRequest, opts ...grpc.CallOption) (*GetPendingHtlcsResponse, error) {
+	out := new(GetPendingHtlcsResponse)
+	err := c.cc.Invoke(ctx, "/lnmux.Service/GetPendingHtlcs", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *serviceClient) NotifyHtlcAccepted(ctx context.Context, in *NotifyHtlcAcceptedRequest, opts ...grpc.CallOption) (*NotifyHtlcAcceptedResponse, error) {
+	out := new(NotifyHtlcAcceptedResponse)
+	err := c.cc.Invoke(ctx, "/lnmux.Service/NotifyHtlcAccepted", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *serviceClient) NotifyHtlcSettled(ctx context.Context, in *NotifyHtlcSettledRequest, opts ...grpc.CallOption) (*NotifyHtlcSettledResponse, error) {
+	out := new(NotifyHtlcSettledResponse)
+	err := c.cc.Invoke(ctx, "/lnmux.Service/NotifyHtlcSettled", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ServiceServer is the server API for Service service.
 // All implementations must embed UnimplementedServiceServer
 // for forward compatibility
@@ -142,6 +206,11 @@ type ServiceServer interface {
 	// Lists settled or to be settled invoices. It returns invoices with a sequence number between
 	// 'sequence_start' and 'sequence_start' + max_invoices_count'.
 	ListInvoices(context.Context, *ListInvoicesRequest) (*ListInvoicesResponse, error)
+	// Node sidecar RPCs
+	SubscribeResolutions(*SubscribeResolutionsRequest, Service_SubscribeResolutionsServer) error
+	GetPendingHtlcs(context.Context, *GetPendingHtlcsRequest) (*GetPendingHtlcsResponse, error)
+	NotifyHtlcAccepted(context.Context, *NotifyHtlcAcceptedRequest) (*NotifyHtlcAcceptedResponse, error)
+	NotifyHtlcSettled(context.Context, *NotifyHtlcSettledRequest) (*NotifyHtlcSettledResponse, error)
 	mustEmbedUnimplementedServiceServer()
 }
 
@@ -169,6 +238,18 @@ func (UnimplementedServiceServer) CancelInvoice(context.Context, *CancelInvoiceR
 }
 func (UnimplementedServiceServer) ListInvoices(context.Context, *ListInvoicesRequest) (*ListInvoicesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListInvoices not implemented")
+}
+func (UnimplementedServiceServer) SubscribeResolutions(*SubscribeResolutionsRequest, Service_SubscribeResolutionsServer) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeResolutions not implemented")
+}
+func (UnimplementedServiceServer) GetPendingHtlcs(context.Context, *GetPendingHtlcsRequest) (*GetPendingHtlcsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetPendingHtlcs not implemented")
+}
+func (UnimplementedServiceServer) NotifyHtlcAccepted(context.Context, *NotifyHtlcAcceptedRequest) (*NotifyHtlcAcceptedResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NotifyHtlcAccepted not implemented")
+}
+func (UnimplementedServiceServer) NotifyHtlcSettled(context.Context, *NotifyHtlcSettledRequest) (*NotifyHtlcSettledResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NotifyHtlcSettled not implemented")
 }
 func (UnimplementedServiceServer) mustEmbedUnimplementedServiceServer() {}
 
@@ -312,6 +393,81 @@ func _Service_ListInvoices_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Service_SubscribeResolutions_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeResolutionsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ServiceServer).SubscribeResolutions(m, &serviceSubscribeResolutionsServer{stream})
+}
+
+type Service_SubscribeResolutionsServer interface {
+	Send(*SubscribeResolutionsResponse) error
+	grpc.ServerStream
+}
+
+type serviceSubscribeResolutionsServer struct {
+	grpc.ServerStream
+}
+
+func (x *serviceSubscribeResolutionsServer) Send(m *SubscribeResolutionsResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _Service_GetPendingHtlcs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPendingHtlcsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ServiceServer).GetPendingHtlcs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/lnmux.Service/GetPendingHtlcs",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ServiceServer).GetPendingHtlcs(ctx, req.(*GetPendingHtlcsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Service_NotifyHtlcAccepted_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NotifyHtlcAcceptedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ServiceServer).NotifyHtlcAccepted(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/lnmux.Service/NotifyHtlcAccepted",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ServiceServer).NotifyHtlcAccepted(ctx, req.(*NotifyHtlcAcceptedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Service_NotifyHtlcSettled_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NotifyHtlcSettledRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ServiceServer).NotifyHtlcSettled(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/lnmux.Service/NotifyHtlcSettled",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ServiceServer).NotifyHtlcSettled(ctx, req.(*NotifyHtlcSettledRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Service_ServiceDesc is the grpc.ServiceDesc for Service service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -343,11 +499,28 @@ var Service_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ListInvoices",
 			Handler:    _Service_ListInvoices_Handler,
 		},
+		{
+			MethodName: "GetPendingHtlcs",
+			Handler:    _Service_GetPendingHtlcs_Handler,
+		},
+		{
+			MethodName: "NotifyHtlcAccepted",
+			Handler:    _Service_NotifyHtlcAccepted_Handler,
+		},
+		{
+			MethodName: "NotifyHtlcSettled",
+			Handler:    _Service_NotifyHtlcSettled_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "SubscribeInvoiceAccepted",
 			Handler:       _Service_SubscribeInvoiceAccepted_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "SubscribeResolutions",
+			Handler:       _Service_SubscribeResolutions_Handler,
 			ServerStreams: true,
 		},
 	},

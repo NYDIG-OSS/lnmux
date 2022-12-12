@@ -23,7 +23,32 @@ service Service {
     // Lists settled or to be settled invoices. It returns invoices with a sequence number between
     // 'sequence_start' and 'sequence_start' + max_invoices_count'.
     rpc ListInvoices(ListInvoicesRequest)  returns (ListInvoicesResponse);
+
+    // Node sidecar RPCs
+    rpc SubscribeResolutions(SubscribeResolutionsRequest) returns (stream SubscribeResolutionsResponse);
+
+    rpc GetPendingHtlcs(GetPendingHtlcsRequest) returns (GetPendingHtlcsResponse);
+
+    rpc NotifyHtlcAccepted(NotifyHtlcAcceptedRequest) returns (NotifyHtlcAcceptedResponse);
+
+    rpc NotifyHtlcSettled(NotifyHtlcSettledRequest) returns (NotifyHtlcSettledResponse);
 }
+
+message GetPendingHtlcsRequest {}
+
+message GetPendingHtlcsResponse {}
+
+message SubscribeResolutionsRequest {}
+
+message SubscribeResolutionsResponse {}
+
+message NotifyHtlcAcceptedRequest {}
+
+message NotifyHtlcAcceptedResponse {}
+
+message NotifyHtlcSettledRequest {}
+
+message NotifyHtlcSettledResponse {}
 
 message GetInfoRequest {}
 
