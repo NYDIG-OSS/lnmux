@@ -2,7 +2,7 @@ package lnd
 
 import (
 	"context"
-	"io/ioutil"
+	"os"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -27,7 +27,7 @@ func loadGrpcConn(tlsPath, macaroonPath, url string) (*grpc.ClientConn, error) {
 		return nil, err
 	}
 
-	macaroonBytes, err := ioutil.ReadFile(macaroonPath)
+	macaroonBytes, err := os.ReadFile(macaroonPath)
 	if err != nil {
 		return nil, err
 	}
