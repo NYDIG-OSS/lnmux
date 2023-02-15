@@ -17,7 +17,7 @@ require (
 	github.com/lightningnetwork/lnd v0.15.4-beta
 	github.com/lightningnetwork/lnd/clock v1.1.0
 	github.com/lightningnetwork/lnd/queue v1.1.0
-	github.com/prometheus/client_golang v1.11.0
+	github.com/prometheus/client_golang v1.11.1
 	github.com/stretchr/testify v1.7.1
 	github.com/urfave/cli/v2 v2.2.0
 	go.uber.org/zap v1.17.0
