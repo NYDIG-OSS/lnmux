@@ -8,9 +8,11 @@ import (
 
 	"github.com/bottlepay/lnmux/common"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/hashicorp/go-version"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/chainrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
+	"github.com/lightningnetwork/lnd/lnrpc/verrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -18,6 +20,8 @@ import (
 //go:generate mockgen --destination=mock_lnd_client.go --self_package=github.com/bottlepay/lnmux/lnd --package=lnd github.com/bottlepay/lnmux/lnd LndClient
 
 var ErrInterceptorNotRequired = errors.New("lnd requireinterceptor flag not set")
+
+var minRequiredLndVersion, _ = version.NewSemver("v0.15.4-beta")
 
 type LndClient interface {
 	PubKey() common.PubKey
@@ -38,6 +42,7 @@ type lndClient struct {
 
 	grpcClient     *grpc.ClientConn
 	lnClient       lnrpc.LightningClient
+	verClient      verrpc.VersionerClient
 	routerClient   routerrpc.RouterClient
 	notifierClient chainrpc.ChainNotifierClient
 
@@ -73,6 +78,7 @@ func NewLndClient(ctx context.Context, cfg Config) (LndClient, error) {
 		lnClient:       lnrpc.NewLightningClient(conn),
 		routerClient:   routerrpc.NewRouterClient(conn),
 		notifierClient: chainrpc.NewChainNotifierClient(conn),
+		verClient:      verrpc.NewVersionerClient(conn),
 	}
 
 	// Test the lnd connection if it is available.
@@ -92,6 +98,24 @@ func (l *lndClient) tryValidateConfig(ctx context.Context) error {
 	// Only validate the config once.
 	if l.configCheckPassed {
 		return nil
+	}
+
+	// Request version info.
+	ver, err := l.verClient.GetVersion(ctx, &verrpc.VersionRequest{})
+	if err != nil {
+		return err
+	}
+
+	// Verify version against minimum requirement.
+	lndVersion, err := version.NewSemver(ver.Version)
+	if err != nil {
+		return err
+	}
+
+	if !lndVersion.GreaterThanOrEqual(minRequiredLndVersion) {
+		return fmt.Errorf("connected to lnd version %v, "+
+			"but minimum required version is %v",
+			lndVersion, minRequiredLndVersion)
 	}
 
 	// Request node info.
