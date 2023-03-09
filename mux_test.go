@@ -58,6 +58,15 @@ func createTestLndClient(ctrl *gomock.Controller,
 	htlcChan := make(chan *routerrpc.ForwardHtlcInterceptRequest)
 	responseChan := make(chan *routerrpc.ForwardHtlcInterceptResponse, 1)
 	closeChan := make(chan struct{})
+	blockChan := make(chan *chainrpc.BlockEpoch)
+
+	testLnd := &testLndClient{
+		client:       lndClient,
+		htlcChan:     htlcChan,
+		responseChan: responseChan,
+		blockChan:    blockChan,
+	}
+
 	lndClient.EXPECT().HtlcInterceptor(gomock.Any()).
 		DoAndReturn(func(ctx context.Context) (
 			func(*routerrpc.ForwardHtlcInterceptResponse) error,
@@ -84,17 +93,10 @@ func createTestLndClient(ctrl *gomock.Controller,
 				nil
 		}).AnyTimes()
 
-	blockChan := make(chan *chainrpc.BlockEpoch)
 	lndClient.EXPECT().RegisterBlockEpochNtfn(gomock.Any()).
 		Return(blockChan, nil, nil).AnyTimes()
 
-	return &testLndClient{
-		client:       lndClient,
-		htlcChan:     htlcChan,
-		responseChan: responseChan,
-		blockChan:    blockChan,
-		closeChan:    closeChan,
-	}
+	return testLnd
 }
 
 func TestMux(t *testing.T) {
