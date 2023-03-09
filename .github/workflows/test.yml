@@ -9,7 +9,7 @@ on:
 jobs:
   unit-test:
     runs-on: ubuntu-latest
-    container: golang:1.18
+    container: golang:1.19
 
     services:
       postgres:
