@@ -26,7 +26,7 @@ import (
 	"github.com/lightningnetwork/lnd/routing/route"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 )
 
 var (
@@ -101,7 +101,7 @@ func TestMux(t *testing.T) {
 	defer test_common.Timeout()()
 	t.Parallel()
 
-	logger, _ := zap.NewDevelopment()
+	logger := zaptest.NewLogger(t)
 
 	keyRing := NewKeyRing(testKey)
 
@@ -456,7 +456,7 @@ func setupTestDB(t *testing.T) (*persistence.PostgresPersister, func()) {
 		MigrationsPath: "./persistence/migrations",
 	})
 
-	log := zap.NewNop().Sugar()
+	log := zaptest.NewLogger(t).Sugar()
 	db := persistence.NewPostgresPersisterFromOptions(dbSettings, log)
 
 	drop := func() {

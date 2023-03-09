@@ -16,6 +16,7 @@ import (
 	"github.com/lightningnetwork/lnd/record"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 )
 
 // registryTestContext contains all the elements needed to spin up a registry
@@ -86,7 +87,7 @@ func optTestAmt(amt int64) regTestContextOption { // nolint:unused
 func newRegistryTestContext(t *testing.T,
 	opts ...regTestContextOption) *registryTestContext {
 
-	logger, _ := zap.NewDevelopment()
+	logger := zaptest.NewLogger(t)
 
 	db, dropDB := setupTestDB(t)
 
