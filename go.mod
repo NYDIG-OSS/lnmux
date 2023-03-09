@@ -13,6 +13,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
+	github.com/hashicorp/go-version v1.6.0
 	github.com/lightningnetwork/lightning-onion v1.0.2-0.20220211021909-bb84a1ccb0c5
 	github.com/lightningnetwork/lnd v0.15.4-beta
 	github.com/lightningnetwork/lnd/clock v1.1.0
