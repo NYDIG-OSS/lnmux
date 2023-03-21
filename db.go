@@ -43,11 +43,6 @@ var (
 type Invoice struct {
 	types.InvoiceCreationData
 
-	Settled bool
-
-	// SettleDate is the exact time the invoice was settled.
-	SettleDate time.Time
-
 	// CreationDate is the exact time the invoice was created.
 	CreationDate time.Time
 

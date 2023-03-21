@@ -25,13 +25,6 @@ type Invoice struct {
 	Settled           bool
 }
 
-type InvoiceState int
-
-const (
-	InvoiceStateAccepted InvoiceState = iota
-	InvoiceStateSettleRequested
-)
-
 type InvoiceCreationData struct {
 	types.InvoiceCreationData
 }

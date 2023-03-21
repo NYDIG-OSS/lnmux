@@ -79,7 +79,6 @@ type RegistryConfig struct {
 	GracePeriodWithoutSubscribers time.Duration
 }
 
-type InvoiceCallback func(update InvoiceUpdate)
 type AcceptCallback func(lntypes.Hash, SetID)
 
 type invoiceRequest struct {
@@ -824,10 +823,6 @@ func (i *InvoiceRegistry) process(ctx context.Context, h *registryHtlc) error {
 	}
 
 	return nil
-}
-
-type InvoiceUpdate struct {
-	State persistence.InvoiceState
 }
 
 func (i *InvoiceRegistry) requestSettle(set htlcSet) error {
