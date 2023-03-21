@@ -336,9 +336,23 @@ func dbInvoiceToProto(invoice *persistence.Invoice) *lnmuxrpc.Invoice {
 		Hash:              invoice.PaymentPreimage[:],
 		Preimage:          preimage[:],
 		AmountMsat:        uint64(invoice.InvoiceCreationData.Value),
-		Settled:           invoice.Settled,
+		Status:            invoiceStatusToProto(invoice.Status),
 		SettleRequestedAt: uint64(invoice.SettleRequestedAt.Unix()),
-		SettledAt:         uint64(invoice.SettledAt.Unix()),
+		FinalizedAt:       uint64(invoice.FinalizedAt.Unix()),
 		SequenceNumber:    invoice.SequenceNum,
 	}
+}
+
+func invoiceStatusToProto(invoiceStatus types.InvoiceStatus) lnmuxrpc.InvoiceStatus {
+	var status lnmuxrpc.InvoiceStatus
+	switch invoiceStatus {
+	case types.InvoiceStatusSettled:
+		status = lnmuxrpc.InvoiceStatus_SETTLED
+	case types.InvoiceStatusSettleRequested:
+		status = lnmuxrpc.InvoiceStatus_SETTLE_REQUESTED
+	case types.InvoiceStatusFailed:
+		status = lnmuxrpc.InvoiceStatus_FAILED
+	}
+
+	return status
 }

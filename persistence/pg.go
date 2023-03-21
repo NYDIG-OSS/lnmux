@@ -21,8 +21,8 @@ type Invoice struct {
 
 	SequenceNum       uint64
 	SettleRequestedAt time.Time
-	SettledAt         time.Time
-	Settled           bool
+	FinalizedAt       time.Time
+	Status            types.InvoiceStatus
 }
 
 type InvoiceCreationData struct {
@@ -41,8 +41,9 @@ type dbInvoice struct {
 
 	SettleRequestedAt time.Time `pg:"settle_requested_at"`
 
-	Settled   bool      `pg:"settled,use_zero"`
-	SettledAt time.Time `pg:"settled_at"`
+	FinalizedAt time.Time `pg:"finalized_at"`
+
+	Status types.InvoiceStatus `pg:"status"`
 }
 
 type dbHtlc struct {
@@ -57,8 +58,9 @@ type dbHtlc struct {
 
 	SettleRequestedAt time.Time `pg:"settle_requested_at"`
 
-	Settled   bool      `pg:"settled,use_zero"`
-	SettledAt time.Time `pg:"settled_at"`
+	FinalizedAt time.Time `pg:"finalized_at"`
+
+	Status types.HtlcStatus `pg:"status"`
 }
 
 // PostgresPersister persists items to Postgres
@@ -77,9 +79,9 @@ func unmarshallDbInvoice(invoice *dbInvoice) *Invoice {
 			},
 		},
 		SequenceNum:       invoice.SequenceNum,
-		Settled:           invoice.Settled,
 		SettleRequestedAt: invoice.SettleRequestedAt,
-		SettledAt:         invoice.SettledAt,
+		FinalizedAt:       invoice.FinalizedAt,
+		Status:            invoice.Status,
 	}
 }
 
@@ -163,7 +165,7 @@ func (p *PostgresPersister) GetPendingHtlcs(ctx context.Context, node common.Pub
 		var dbHtlcs []*dbHtlc
 		err := tx.ModelContext(ctx, &dbHtlcs).
 			Where("node=?", node).
-			Where("settled=?", false).
+			Where("status=?", types.HtlcStatusSettleRequested).
 			Select()
 		if err != nil {
 			return err
@@ -196,6 +198,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 			Preimage:          invoice.PaymentPreimage,
 			AmountMsat:        int64(invoice.Value),
 			SettleRequestedAt: now,
+			Status:            types.InvoiceStatusSettleRequested,
 		}
 
 		_, err := tx.ModelContext(ctx, dbInvoice).Insert() //nolint:contextcheck
@@ -211,6 +214,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 				HtlcID:            key.HtlcID,
 				AmountMsat:        amt,
 				SettleRequestedAt: now,
+				Status:            types.HtlcStatusSettleRequested,
 			}
 			_, err := tx.Model(&dbHtlc).Insert() // nolint:contextcheck
 			if err != nil {
@@ -268,7 +272,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 		// Count number of htlcs that are not yet settled.
 		count, err := tx.ModelContext(ctx, (*dbHtlc)(nil)).
 			Where("hash=?", invoice.Hash).
-			Where("settled=?", false).
+			Where("status=?", types.HtlcStatusSettleRequested).
 			Count()
 		if err != nil {
 			return err
@@ -281,8 +285,8 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 		// If all htlcs are settled, mark the invoice as settled.
 		result, err := tx.ModelContext(ctx, (*dbInvoice)(nil)).
 			Where("hash=?", invoice.Hash).
-			Set("settled=?", true).
-			Set("settled_at=?", now).
+			Set("status=?", types.InvoiceStatusSettled).
+			Set("finalized_at=?", now).
 			Update() // nolint:contextcheck
 		if err != nil {
 			return err
@@ -328,7 +332,7 @@ func (p *PostgresPersister) selectInvoiceForUpdate(ctx context.Context,
 }
 
 func (p *PostgresPersister) settleHTLC(ctx context.Context,
-	tx *pg.Tx, key types.HtlcKey, settledAt time.Time) error {
+	tx *pg.Tx, key types.HtlcKey, finalizedAt time.Time) error {
 
 	htlc := dbHtlc{
 		Node:   key.Node,
@@ -341,9 +345,9 @@ func (p *PostgresPersister) settleHTLC(ctx context.Context,
 	// exists.
 	result, err := tx.ModelContext(ctx, &htlc).
 		WherePK().
-		Where("settled=?", false).
-		Set("settled=?", true).
-		Set("settled_at=?", settledAt).
+		Where("status=?", types.HtlcStatusSettleRequested).
+		Set("status=?", types.HtlcStatusSettled).
+		Set("finalized_at=?", finalizedAt).
 		Update() // nolint:contextcheck
 	if err != nil {
 		return err

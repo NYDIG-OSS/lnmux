@@ -414,7 +414,7 @@ func TestMux(t *testing.T) {
 	require.Len(t, dbInvoices, 1)
 	require.Equal(t, dbInvoices[0].SequenceNum, uint64(1))
 	require.Equal(t, dbInvoices[0].PaymentPreimage, invoice.PaymentPreimage)
-	require.True(t, dbInvoices[0].Settled)
+	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[0].Status)
 
 	// Waiting for settle again should return immediately with success.
 	require.NoError(t, settledHandler.WaitForInvoiceSettled(
@@ -463,10 +463,10 @@ func TestMux(t *testing.T) {
 	require.Len(t, dbInvoices, 2)
 	require.Equal(t, dbInvoices[0].SequenceNum, uint64(1))
 	require.Equal(t, dbInvoices[0].PaymentPreimage, testPreimage)
-	require.True(t, dbInvoices[0].Settled)
+	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[0].Status)
 	require.Equal(t, dbInvoices[1].SequenceNum, uint64(2))
 	require.Equal(t, dbInvoices[1].PaymentPreimage, testPreimage2)
-	require.True(t, dbInvoices[1].Settled)
+	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[1].Status)
 
 	cancelAcceptSubscription()
 

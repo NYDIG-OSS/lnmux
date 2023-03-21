@@ -64,3 +64,24 @@ type HtlcKey struct {
 func (k HtlcKey) String() string {
 	return fmt.Sprintf("%v:%d:%d", k.Node, k.ChanID, k.HtlcID)
 }
+
+// InvoiceStatus represents the status of an invoice.
+type InvoiceStatus string
+
+// HtlcStatus represents the status of an htlc.
+type HtlcStatus string
+
+const (
+	InvoiceStatusSettleRequested InvoiceStatus = "SETTLE_REQUESTED"
+	InvoiceStatusSettled         InvoiceStatus = "SETTLED"
+	InvoiceStatusFailed          InvoiceStatus = "FAILED"
+
+	HtlcStatusSettleRequested HtlcStatus = "SETTLE_REQUESTED"
+	HtlcStatusSettled         HtlcStatus = "SETTLED"
+	HtlcStatusFailed          HtlcStatus = "FAILED"
+)
+
+func (s InvoiceStatus) IsFinal() bool {
+	return s == InvoiceStatusSettled ||
+		s == InvoiceStatusFailed
+}
