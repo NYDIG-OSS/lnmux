@@ -360,11 +360,10 @@ func TestMux(t *testing.T) {
 
 	setID := expectAccept(testHash)
 
-	// No settle requested yet and we expect WaitForInvoiceSettled to return an
+	// No settle requested yet and we expect WaitForInvoiceFinalEvent to return an
 	// error.
-	require.ErrorIs(t,
-		settledHandler.WaitForInvoiceSettled(context.Background(), testHash),
-		types.ErrInvoiceNotFound)
+	_, err = settledHandler.WaitForInvoiceFinalEvent(context.Background(), testHash)
+	require.ErrorIs(t, err, types.ErrInvoiceNotFound)
 
 	// Register for reconnect and disconnect the htlc notifier and interceptor.
 	l[0].notifierConnectedChanEnabled.Store(true)
@@ -387,10 +386,9 @@ func TestMux(t *testing.T) {
 	// Wait for invoice-level settle signal.
 	settledChan := make(chan struct{})
 	go func() {
-		assert.NoError(t,
-			settledHandler.WaitForInvoiceSettled(
-				context.Background(), testHash,
-			))
+		status, err := settledHandler.WaitForInvoiceFinalEvent(context.Background(), testHash)
+		assert.NoError(t, err)
+		assert.Equal(t, types.InvoiceStatusSettled, status)
 
 		close(settledChan)
 	}()
@@ -417,9 +415,9 @@ func TestMux(t *testing.T) {
 	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[0].Status)
 
 	// Waiting for settle again should return immediately with success.
-	require.NoError(t, settledHandler.WaitForInvoiceSettled(
-		context.Background(), testHash,
-	))
+	status, err := settledHandler.WaitForInvoiceFinalEvent(context.Background(), testHash)
+	require.NoError(t, err)
+	require.Equal(t, types.InvoiceStatusSettled, status)
 
 	_, htlcs, err := db.Get(context.Background(), testHash)
 	require.NoError(t, err)
@@ -453,9 +451,9 @@ func TestMux(t *testing.T) {
 	l[0].notifyFinal(20)
 
 	// Waiting for settle again should return immediately with success.
-	require.NoError(t, settledHandler.WaitForInvoiceSettled(
-		context.Background(), testHash,
-	))
+	status, err = settledHandler.WaitForInvoiceFinalEvent(context.Background(), testHash)
+	require.NoError(t, err)
+	require.Equal(t, types.InvoiceStatusSettled, status)
 
 	// Should have 2 invoices in the response
 	dbInvoices, err = db.GetInvoices(context.Background(), 3, 0)

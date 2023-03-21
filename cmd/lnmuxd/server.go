@@ -154,16 +154,16 @@ func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAccepted
 	}
 }
 
-func (s *server) WaitForInvoiceSettled(ctx context.Context,
-	req *lnmuxrpc.WaitForInvoiceSettledRequest) (
-	*lnmuxrpc.WaitForInvoiceSettledResponse, error) {
+func (s *server) WaitForInvoiceFinalEvent(ctx context.Context,
+	req *lnmuxrpc.WaitForInvoiceFinalEventRequest) (
+	*lnmuxrpc.WaitForInvoiceFinalEventResponse, error) {
 
 	hash, err := lntypes.MakeHash(req.Hash)
 	if err != nil {
 		return nil, err
 	}
 
-	err = s.settledHandler.WaitForInvoiceSettled(ctx, hash)
+	invoiceStatus, err := s.settledHandler.WaitForInvoiceFinalEvent(ctx, hash)
 	switch {
 	case err == types.ErrInvoiceNotFound:
 		return nil, status.Error(
@@ -174,7 +174,9 @@ func (s *server) WaitForInvoiceSettled(ctx context.Context,
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 
-	return &lnmuxrpc.WaitForInvoiceSettledResponse{}, nil
+	return &lnmuxrpc.WaitForInvoiceFinalEventResponse{
+		InvoiceStatus: invoiceStatusToProto(invoiceStatus),
+	}, nil
 }
 
 func (s *server) AddInvoice(ctx context.Context,

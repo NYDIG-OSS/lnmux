@@ -19,7 +19,7 @@ type NodeSettledHandlerConfig struct {
 	Persister       *persistence.PostgresPersister
 	Logger          *zap.SugaredLogger
 	Lnd             lnd.LndClient
-	SettledCallback func(lntypes.Hash)
+	SettledCallback func(lntypes.Hash, types.InvoiceStatus)
 }
 
 type NodeSettledHandler struct {
@@ -29,7 +29,7 @@ type NodeSettledHandler struct {
 
 	newWatchChan chan types.CircuitKey
 
-	settledCallback func(lntypes.Hash)
+	settledCallback func(lntypes.Hash, types.InvoiceStatus)
 }
 
 func NewNodeSettledHandler(cfg *NodeSettledHandlerConfig) *NodeSettledHandler {
@@ -159,7 +159,7 @@ func (p *NodeSettledHandler) handleFinalHtlc(ctx context.Context,
 		"chanID", key.ChanID, "htlcID", key.HtlcID, "hash", settledHash)
 
 	if settledHash != nil {
-		p.settledCallback(*settledHash)
+		p.settledCallback(*settledHash, types.InvoiceStatusSettled)
 	}
 
 	return nil

@@ -36,7 +36,7 @@ type Mux struct {
 type MuxConfig struct {
 	KeyRing         keychain.SecretKeyRing
 	ActiveNetParams *chaincfg.Params
-	SettledCallback func(lntypes.Hash)
+	SettledCallback func(lntypes.Hash, types.InvoiceStatus)
 	Persister       *persistence.PostgresPersister
 
 	Lnd      lnd.LndClient

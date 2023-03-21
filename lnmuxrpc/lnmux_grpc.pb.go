@@ -21,7 +21,7 @@ type ServiceClient interface {
 	GetInfo(ctx context.Context, in *GetInfoRequest, opts ...grpc.CallOption) (*GetInfoResponse, error)
 	AddInvoice(ctx context.Context, in *AddInvoiceRequest, opts ...grpc.CallOption) (*AddInvoiceResponse, error)
 	SubscribeInvoiceAccepted(ctx context.Context, in *SubscribeInvoiceAcceptedRequest, opts ...grpc.CallOption) (Service_SubscribeInvoiceAcceptedClient, error)
-	WaitForInvoiceSettled(ctx context.Context, in *WaitForInvoiceSettledRequest, opts ...grpc.CallOption) (*WaitForInvoiceSettledResponse, error)
+	WaitForInvoiceFinalEvent(ctx context.Context, in *WaitForInvoiceFinalEventRequest, opts ...grpc.CallOption) (*WaitForInvoiceFinalEventResponse, error)
 	// Requests settlement for an accepted invoice. This call is idempotent.
 	SettleInvoice(ctx context.Context, in *SettleInvoiceRequest, opts ...grpc.CallOption) (*SettleInvoiceResponse, error)
 	// Cancels an accepted invoice. In case settle has been requested
@@ -90,9 +90,9 @@ func (x *serviceSubscribeInvoiceAcceptedClient) Recv() (*SubscribeInvoiceAccepte
 	return m, nil
 }
 
-func (c *serviceClient) WaitForInvoiceSettled(ctx context.Context, in *WaitForInvoiceSettledRequest, opts ...grpc.CallOption) (*WaitForInvoiceSettledResponse, error) {
-	out := new(WaitForInvoiceSettledResponse)
-	err := c.cc.Invoke(ctx, "/lnmux.Service/WaitForInvoiceSettled", in, out, opts...)
+func (c *serviceClient) WaitForInvoiceFinalEvent(ctx context.Context, in *WaitForInvoiceFinalEventRequest, opts ...grpc.CallOption) (*WaitForInvoiceFinalEventResponse, error) {
+	out := new(WaitForInvoiceFinalEventResponse)
+	err := c.cc.Invoke(ctx, "/lnmux.Service/WaitForInvoiceFinalEvent", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,7 @@ type ServiceServer interface {
 	GetInfo(context.Context, *GetInfoRequest) (*GetInfoResponse, error)
 	AddInvoice(context.Context, *AddInvoiceRequest) (*AddInvoiceResponse, error)
 	SubscribeInvoiceAccepted(*SubscribeInvoiceAcceptedRequest, Service_SubscribeInvoiceAcceptedServer) error
-	WaitForInvoiceSettled(context.Context, *WaitForInvoiceSettledRequest) (*WaitForInvoiceSettledResponse, error)
+	WaitForInvoiceFinalEvent(context.Context, *WaitForInvoiceFinalEventRequest) (*WaitForInvoiceFinalEventResponse, error)
 	// Requests settlement for an accepted invoice. This call is idempotent.
 	SettleInvoice(context.Context, *SettleInvoiceRequest) (*SettleInvoiceResponse, error)
 	// Cancels an accepted invoice. In case settle has been requested
@@ -158,8 +158,8 @@ func (UnimplementedServiceServer) AddInvoice(context.Context, *AddInvoiceRequest
 func (UnimplementedServiceServer) SubscribeInvoiceAccepted(*SubscribeInvoiceAcceptedRequest, Service_SubscribeInvoiceAcceptedServer) error {
 	return status.Errorf(codes.Unimplemented, "method SubscribeInvoiceAccepted not implemented")
 }
-func (UnimplementedServiceServer) WaitForInvoiceSettled(context.Context, *WaitForInvoiceSettledRequest) (*WaitForInvoiceSettledResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method WaitForInvoiceSettled not implemented")
+func (UnimplementedServiceServer) WaitForInvoiceFinalEvent(context.Context, *WaitForInvoiceFinalEventRequest) (*WaitForInvoiceFinalEventResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method WaitForInvoiceFinalEvent not implemented")
 }
 func (UnimplementedServiceServer) SettleInvoice(context.Context, *SettleInvoiceRequest) (*SettleInvoiceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SettleInvoice not implemented")
@@ -240,20 +240,20 @@ func (x *serviceSubscribeInvoiceAcceptedServer) Send(m *SubscribeInvoiceAccepted
 	return x.ServerStream.SendMsg(m)
 }
 
-func _Service_WaitForInvoiceSettled_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(WaitForInvoiceSettledRequest)
+func _Service_WaitForInvoiceFinalEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WaitForInvoiceFinalEventRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ServiceServer).WaitForInvoiceSettled(ctx, in)
+		return srv.(ServiceServer).WaitForInvoiceFinalEvent(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/lnmux.Service/WaitForInvoiceSettled",
+		FullMethod: "/lnmux.Service/WaitForInvoiceFinalEvent",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ServiceServer).WaitForInvoiceSettled(ctx, req.(*WaitForInvoiceSettledRequest))
+		return srv.(ServiceServer).WaitForInvoiceFinalEvent(ctx, req.(*WaitForInvoiceFinalEventRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -328,8 +328,8 @@ var Service_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Service_AddInvoice_Handler,
 		},
 		{
-			MethodName: "WaitForInvoiceSettled",
-			Handler:    _Service_WaitForInvoiceSettled_Handler,
+			MethodName: "WaitForInvoiceFinalEvent",
+			Handler:    _Service_WaitForInvoiceFinalEvent_Handler,
 		},
 		{
 			MethodName: "SettleInvoice",
