@@ -66,7 +66,10 @@ func (p *SettledHandler) WaitForInvoiceSettled(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	if invoice.Settled {
+
+	// If invoice has status 'SETTLED' or 'FAILED' in DB,
+	// then return.
+	if invoice.Status.IsFinal() {
 		logger.Debugw("Wait for invoice settled completed via db")
 
 		return nil

@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const PGExpectedSchemaVersion = 3
+const PGExpectedSchemaVersion = 4
 
 var dbSuffix uint32
 

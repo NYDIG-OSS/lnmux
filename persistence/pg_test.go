@@ -90,7 +90,7 @@ func TestSettleInvoice(t *testing.T) {
 
 	invoice, _, err := persister.Get(context.Background(), hash)
 	require.NoError(t, err)
-	require.False(t, invoice.Settled)
+	require.Equal(t, types.InvoiceStatusSettleRequested, invoice.Status)
 
 	settledHash, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
@@ -103,7 +103,7 @@ func TestSettleInvoice(t *testing.T) {
 	invoice, htlcs, err = persister.Get(context.Background(), hash)
 	require.NoError(t, err)
 	require.Len(t, htlcs, 2)
-	require.True(t, invoice.Settled)
+	require.Equal(t, types.InvoiceStatusSettled, invoice.Status)
 
 	pendingHtlcs, err = persister.GetPendingHtlcs(context.Background(), nodeKey)
 	require.NoError(t, err)
@@ -226,7 +226,7 @@ func TestGetSettledInvoices(t *testing.T) {
 	require.Len(t, dbInvoices, 1)
 	require.Equal(t, dbInvoices[0].SequenceNum, uint64(1))
 	require.Equal(t, dbInvoices[0].PaymentPreimage, invoices[0].PaymentPreimage)
-	require.True(t, dbInvoices[0].Settled)
+	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[0].Status)
 
 	// Ask for invoices with a sequence number greater than 2 (max 1 invoice): only the second invoice should be returned
 	dbInvoices, err = persister.GetInvoices(context.Background(), 1, 2)
@@ -234,7 +234,7 @@ func TestGetSettledInvoices(t *testing.T) {
 	require.Len(t, dbInvoices, 1)
 	require.Equal(t, dbInvoices[0].SequenceNum, uint64(2))
 	require.Equal(t, dbInvoices[0].PaymentPreimage, invoices[1].PaymentPreimage)
-	require.True(t, dbInvoices[0].Settled)
+	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[0].Status)
 
 	// Ask for all settled or to be settled invoices
 	// Now we should have 3 invoices (2 settled and one not settled yet)
@@ -243,11 +243,11 @@ func TestGetSettledInvoices(t *testing.T) {
 	require.Len(t, dbInvoices, 3)
 	require.Equal(t, dbInvoices[0].SequenceNum, uint64(1))
 	require.Equal(t, dbInvoices[0].PaymentPreimage, invoices[0].PaymentPreimage)
-	require.True(t, dbInvoices[0].Settled)
+	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[0].Status)
 	require.Equal(t, dbInvoices[1].SequenceNum, uint64(2))
 	require.Equal(t, dbInvoices[1].PaymentPreimage, invoices[1].PaymentPreimage)
-	require.True(t, dbInvoices[1].Settled)
+	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[1].Status)
 	require.Equal(t, dbInvoices[2].SequenceNum, uint64(3))
 	require.Equal(t, dbInvoices[2].PaymentPreimage, invoices[2].PaymentPreimage)
-	require.False(t, dbInvoices[2].Settled)
+	require.Equal(t, types.InvoiceStatusSettleRequested, dbInvoices[2].Status)
 }
