@@ -66,37 +66,37 @@ func TestSettleInvoice(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pendingHtlcs, 2)
 
-	_, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
+	_, err = persister.MarkHtlcFinal(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
 		ChanID: 99,
 		HtlcID: 99,
-	})
+	}, true)
 	require.ErrorIs(t, err, types.ErrHtlcNotFound)
 
-	settledHash, err := persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
+	settledHash, err := persister.MarkHtlcFinal(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
 		ChanID: 10,
 		HtlcID: 11,
-	})
+	}, true)
 	require.NoError(t, err)
 	require.Nil(t, settledHash)
 
-	_, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
+	_, err = persister.MarkHtlcFinal(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
 		ChanID: 10,
 		HtlcID: 11,
-	})
-	require.Error(t, err, ErrHtlcAlreadySettled)
+	}, true)
+	require.Error(t, err, ErrHtlcAlreadyFinal)
 
 	invoice, _, err := persister.Get(context.Background(), hash)
 	require.NoError(t, err)
 	require.Equal(t, types.InvoiceStatusSettleRequested, invoice.Status)
 
-	settledHash, err = persister.MarkHtlcSettled(context.Background(), types.HtlcKey{
+	settledHash, err = persister.MarkHtlcFinal(context.Background(), types.HtlcKey{
 		Node:   nodeKey,
 		ChanID: 11,
 		HtlcID: 12,
-	})
+	}, true)
 	require.NoError(t, err)
 	require.Equal(t, hash, *settledHash)
 
@@ -146,7 +146,9 @@ func TestConcurrentHtlcSettle(t *testing.T) {
 		htlc := htlc
 
 		go func() {
-			invoiceSettled, err := persister.MarkHtlcSettled(context.Background(), htlc)
+			invoiceSettled, err := persister.MarkHtlcFinal(
+				context.Background(), htlc, true,
+			)
 			require.NoError(t, err)
 
 			settledChan <- invoiceSettled != nil
@@ -214,7 +216,9 @@ func TestGetSettledInvoices(t *testing.T) {
 		var invoiceSettled *lntypes.Hash
 		for htlc := range invoices[i].htlcs {
 			var err error
-			invoiceSettled, err = persister.MarkHtlcSettled(context.Background(), htlc)
+			invoiceSettled, err = persister.MarkHtlcFinal(
+				context.Background(), htlc, true,
+			)
 			require.NoError(t, err)
 		}
 		require.NotNil(t, invoiceSettled)
@@ -250,4 +254,85 @@ func TestGetSettledInvoices(t *testing.T) {
 	require.Equal(t, dbInvoices[2].SequenceNum, uint64(3))
 	require.Equal(t, dbInvoices[2].PaymentPreimage, invoices[2].PaymentPreimage)
 	require.Equal(t, types.InvoiceStatusSettleRequested, dbInvoices[2].Status)
+}
+
+func TestFailInvoice(t *testing.T) {
+	t.Parallel()
+
+	persister, dropDB := setupTestDB(t)
+	defer dropDB()
+
+	preimage := lntypes.Preimage{1}
+	hash := preimage.Hash()
+
+	// Initially no invoices are expected.
+	_, _, err := persister.Get(context.Background(), hash)
+	require.ErrorIs(t, err, types.ErrInvoiceNotFound)
+
+	nodeKey := common.PubKey{1}
+	htlcs := map[types.HtlcKey]int64{
+		{
+			Node:   nodeKey,
+			ChanID: 10,
+			HtlcID: 11,
+		}: 70,
+		{
+			Node:   nodeKey,
+			ChanID: 11,
+			HtlcID: 12,
+		}: 30,
+	}
+	require.NoError(t, persister.RequestSettle(context.Background(), &InvoiceCreationData{
+		InvoiceCreationData: types.InvoiceCreationData{
+			PaymentPreimage: preimage,
+			Value:           100,
+			PaymentAddr:     [32]byte{2},
+		},
+	}, htlcs))
+
+	pendingHtlcs, err := persister.GetPendingHtlcs(context.Background(), nodeKey)
+	require.NoError(t, err)
+	require.Len(t, pendingHtlcs, 2)
+
+	_, err = persister.MarkHtlcFinal(context.Background(), types.HtlcKey{
+		Node:   nodeKey,
+		ChanID: 99,
+		HtlcID: 99,
+	}, false)
+	require.ErrorIs(t, err, types.ErrHtlcNotFound)
+
+	// One of the HTLC in the set is marked as FAILED.
+	failedHash, err := persister.MarkHtlcFinal(context.Background(), types.HtlcKey{
+		Node:   nodeKey,
+		ChanID: 10,
+		HtlcID: 11,
+	}, false)
+	require.NoError(t, err)
+	require.NotNil(t, failedHash)
+	require.Equal(t, hash, *failedHash)
+
+	_, err = persister.MarkHtlcFinal(context.Background(), types.HtlcKey{
+		Node:   nodeKey,
+		ChanID: 10,
+		HtlcID: 11,
+	}, false)
+	require.Error(t, err, ErrHtlcAlreadyFinal)
+
+	// As one HTLC of the set failed, the invoice should be marked as FAILED.
+	invoice, _, err := persister.Get(context.Background(), hash)
+	require.NoError(t, err)
+	require.Equal(t, types.InvoiceStatusFailed, invoice.Status)
+
+	// As one HTLC failed, the invoice shouldn't be marked as settled
+	settledHash, err := persister.MarkHtlcFinal(context.Background(), types.HtlcKey{
+		Node:   nodeKey,
+		ChanID: 11,
+		HtlcID: 12,
+	}, false)
+	require.NoError(t, err)
+	require.Nil(t, settledHash)
+
+	pendingHtlcs, err = persister.GetPendingHtlcs(context.Background(), nodeKey)
+	require.NoError(t, err)
+	require.Empty(t, pendingHtlcs)
 }

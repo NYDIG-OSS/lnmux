@@ -94,12 +94,7 @@ func (p *NodeSettledHandler) subscribeEvents(ctx context.Context) error {
 			return err
 		}
 
-		if !settled {
-			// TODO: Handle lost htlc.
-			continue
-		}
-
-		if err := p.handleFinalHtlc(ctx, key); err != nil {
+		if err := p.handleFinalHtlc(ctx, key, settled); err != nil {
 			return err
 		}
 	}
@@ -115,25 +110,30 @@ func (p *NodeSettledHandler) subscribeEvents(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		if !finalEvent.FinalHtlcEvent.Settled {
-			// TODO: Handle final fail?
-
-			continue
-		}
 
 		key := types.CircuitKey{
 			ChanID: event.IncomingChannelId,
 			HtlcID: event.IncomingHtlcId,
 		}
 
-		if err := p.handleFinalHtlc(ctx, key); err != nil {
+		err = p.handleFinalHtlc(
+			ctx, key, finalEvent.FinalHtlcEvent.Settled,
+		)
+		if err != nil {
 			return err
 		}
 	}
 }
 
 func (p *NodeSettledHandler) handleFinalHtlc(ctx context.Context,
-	key types.CircuitKey) error {
+	key types.CircuitKey, settled bool) error {
+
+	var status types.HtlcStatus
+	if settled {
+		status = types.HtlcStatusSettled
+	} else {
+		status = types.HtlcStatusFailed
+	}
 
 	htlcKey := types.HtlcKey{
 		ChanID: key.ChanID,
@@ -141,25 +141,30 @@ func (p *NodeSettledHandler) handleFinalHtlc(ctx context.Context,
 		Node:   p.lnd.PubKey(),
 	}
 
-	settledHash, err := p.persister.MarkHtlcSettled(ctx, htlcKey)
+	invoiceHash, err := p.persister.MarkHtlcFinal(ctx, htlcKey, settled)
 	switch {
-	case err == persistence.ErrHtlcAlreadySettled:
+	case err == persistence.ErrHtlcAlreadyFinal:
 		return nil
 
-	// If the htlc is not found, the final resolution was for an htlc that isn't
-	// managed by lnmux.
+	// If the htlc is not found, the final resolution was for an htlc that
+	// isn't managed by lnmux.
 	case err == types.ErrHtlcNotFound:
 		return nil
 
 	case err != nil:
-		return fmt.Errorf("unable to mark htlc %v settled: %w", key, err)
+		return fmt.Errorf("unable to mark htlc %v as %s : %w",
+			key, status, err)
 	}
 
-	p.logger.Infow("Htlc final settled received",
-		"chanID", key.ChanID, "htlcID", key.HtlcID, "hash", settledHash)
+	p.logger.Infow("Htlc final resolution received",
+		"chanID", key.ChanID,
+		"htlcID", key.HtlcID,
+		"hash", invoiceHash,
+		"status", status,
+	)
 
-	if settledHash != nil {
-		p.settledCallback(*settledHash, types.InvoiceStatusSettled)
+	if invoiceHash != nil {
+		p.settledCallback(*invoiceHash, types.InvoiceStatus(status))
 	}
 
 	return nil
