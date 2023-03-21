@@ -538,10 +538,10 @@ var _ interface {
 	ErrorName() string
 } = SubscribeInvoiceAcceptedResponseValidationError{}
 
-// Validate checks the field values on WaitForInvoiceSettledRequest with the
-// rules defined in the proto definition for this message. If any rules are
-// violated, an error is returned.
-func (m *WaitForInvoiceSettledRequest) Validate() error {
+// Validate checks the field values on WaitForInvoiceFinalStatusRequest with
+// the rules defined in the proto definition for this message. If any rules
+// are violated, an error is returned.
+func (m *WaitForInvoiceFinalStatusRequest) Validate() error {
 	if m == nil {
 		return nil
 	}
@@ -551,10 +551,10 @@ func (m *WaitForInvoiceSettledRequest) Validate() error {
 	return nil
 }
 
-// WaitForInvoiceSettledRequestValidationError is the validation error returned
-// by WaitForInvoiceSettledRequest.Validate if the designated constraints
-// aren't met.
-type WaitForInvoiceSettledRequestValidationError struct {
+// WaitForInvoiceFinalStatusRequestValidationError is the validation error
+// returned by WaitForInvoiceFinalStatusRequest.Validate if the designated
+// constraints aren't met.
+type WaitForInvoiceFinalStatusRequestValidationError struct {
 	field  string
 	reason string
 	cause  error
@@ -562,24 +562,24 @@ type WaitForInvoiceSettledRequestValidationError struct {
 }
 
 // Field function returns field value.
-func (e WaitForInvoiceSettledRequestValidationError) Field() string { return e.field }
+func (e WaitForInvoiceFinalStatusRequestValidationError) Field() string { return e.field }
 
 // Reason function returns reason value.
-func (e WaitForInvoiceSettledRequestValidationError) Reason() string { return e.reason }
+func (e WaitForInvoiceFinalStatusRequestValidationError) Reason() string { return e.reason }
 
 // Cause function returns cause value.
-func (e WaitForInvoiceSettledRequestValidationError) Cause() error { return e.cause }
+func (e WaitForInvoiceFinalStatusRequestValidationError) Cause() error { return e.cause }
 
 // Key function returns key value.
-func (e WaitForInvoiceSettledRequestValidationError) Key() bool { return e.key }
+func (e WaitForInvoiceFinalStatusRequestValidationError) Key() bool { return e.key }
 
 // ErrorName returns error name.
-func (e WaitForInvoiceSettledRequestValidationError) ErrorName() string {
-	return "WaitForInvoiceSettledRequestValidationError"
+func (e WaitForInvoiceFinalStatusRequestValidationError) ErrorName() string {
+	return "WaitForInvoiceFinalStatusRequestValidationError"
 }
 
 // Error satisfies the builtin error interface
-func (e WaitForInvoiceSettledRequestValidationError) Error() string {
+func (e WaitForInvoiceFinalStatusRequestValidationError) Error() string {
 	cause := ""
 	if e.cause != nil {
 		cause = fmt.Sprintf(" | caused by: %v", e.cause)
@@ -591,14 +591,14 @@ func (e WaitForInvoiceSettledRequestValidationError) Error() string {
 	}
 
 	return fmt.Sprintf(
-		"invalid %sWaitForInvoiceSettledRequest.%s: %s%s",
+		"invalid %sWaitForInvoiceFinalStatusRequest.%s: %s%s",
 		key,
 		e.field,
 		e.reason,
 		cause)
 }
 
-var _ error = WaitForInvoiceSettledRequestValidationError{}
+var _ error = WaitForInvoiceFinalStatusRequestValidationError{}
 
 var _ interface {
 	Field() string
@@ -606,23 +606,25 @@ var _ interface {
 	Key() bool
 	Cause() error
 	ErrorName() string
-} = WaitForInvoiceSettledRequestValidationError{}
+} = WaitForInvoiceFinalStatusRequestValidationError{}
 
-// Validate checks the field values on WaitForInvoiceSettledResponse with the
-// rules defined in the proto definition for this message. If any rules are
-// violated, an error is returned.
-func (m *WaitForInvoiceSettledResponse) Validate() error {
+// Validate checks the field values on WaitForInvoiceFinalStatusResponse with
+// the rules defined in the proto definition for this message. If any rules
+// are violated, an error is returned.
+func (m *WaitForInvoiceFinalStatusResponse) Validate() error {
 	if m == nil {
 		return nil
 	}
 
+	// no validation rules for InvoiceStatus
+
 	return nil
 }
 
-// WaitForInvoiceSettledResponseValidationError is the validation error
-// returned by WaitForInvoiceSettledResponse.Validate if the designated
+// WaitForInvoiceFinalStatusResponseValidationError is the validation error
+// returned by WaitForInvoiceFinalStatusResponse.Validate if the designated
 // constraints aren't met.
-type WaitForInvoiceSettledResponseValidationError struct {
+type WaitForInvoiceFinalStatusResponseValidationError struct {
 	field  string
 	reason string
 	cause  error
@@ -630,24 +632,24 @@ type WaitForInvoiceSettledResponseValidationError struct {
 }
 
 // Field function returns field value.
-func (e WaitForInvoiceSettledResponseValidationError) Field() string { return e.field }
+func (e WaitForInvoiceFinalStatusResponseValidationError) Field() string { return e.field }
 
 // Reason function returns reason value.
-func (e WaitForInvoiceSettledResponseValidationError) Reason() string { return e.reason }
+func (e WaitForInvoiceFinalStatusResponseValidationError) Reason() string { return e.reason }
 
 // Cause function returns cause value.
-func (e WaitForInvoiceSettledResponseValidationError) Cause() error { return e.cause }
+func (e WaitForInvoiceFinalStatusResponseValidationError) Cause() error { return e.cause }
 
 // Key function returns key value.
-func (e WaitForInvoiceSettledResponseValidationError) Key() bool { return e.key }
+func (e WaitForInvoiceFinalStatusResponseValidationError) Key() bool { return e.key }
 
 // ErrorName returns error name.
-func (e WaitForInvoiceSettledResponseValidationError) ErrorName() string {
-	return "WaitForInvoiceSettledResponseValidationError"
+func (e WaitForInvoiceFinalStatusResponseValidationError) ErrorName() string {
+	return "WaitForInvoiceFinalStatusResponseValidationError"
 }
 
 // Error satisfies the builtin error interface
-func (e WaitForInvoiceSettledResponseValidationError) Error() string {
+func (e WaitForInvoiceFinalStatusResponseValidationError) Error() string {
 	cause := ""
 	if e.cause != nil {
 		cause = fmt.Sprintf(" | caused by: %v", e.cause)
@@ -659,14 +661,14 @@ func (e WaitForInvoiceSettledResponseValidationError) Error() string {
 	}
 
 	return fmt.Sprintf(
-		"invalid %sWaitForInvoiceSettledResponse.%s: %s%s",
+		"invalid %sWaitForInvoiceFinalStatusResponse.%s: %s%s",
 		key,
 		e.field,
 		e.reason,
 		cause)
 }
 
-var _ error = WaitForInvoiceSettledResponseValidationError{}
+var _ error = WaitForInvoiceFinalStatusResponseValidationError{}
 
 var _ interface {
 	Field() string
@@ -674,7 +676,7 @@ var _ interface {
 	Key() bool
 	Cause() error
 	ErrorName() string
-} = WaitForInvoiceSettledResponseValidationError{}
+} = WaitForInvoiceFinalStatusResponseValidationError{}
 
 // Validate checks the field values on SettleInvoiceRequest with the rules
 // defined in the proto definition for this message. If any rules are

@@ -16,10 +16,10 @@ import (
 const subscribeEventsRetryDelay = time.Second
 
 type NodeSettledHandlerConfig struct {
-	Persister       *persistence.PostgresPersister
-	Logger          *zap.SugaredLogger
-	Lnd             lnd.LndClient
-	SettledCallback func(lntypes.Hash)
+	Persister     *persistence.PostgresPersister
+	Logger        *zap.SugaredLogger
+	Lnd           lnd.LndClient
+	FinalCallback func(lntypes.Hash, bool)
 }
 
 type NodeSettledHandler struct {
@@ -27,17 +27,17 @@ type NodeSettledHandler struct {
 	logger    *zap.SugaredLogger
 	lnd       lnd.LndClient
 
-	settledCallback func(lntypes.Hash)
+	finalCallback func(lntypes.Hash, bool)
 }
 
 func NewNodeSettledHandler(cfg *NodeSettledHandlerConfig) *NodeSettledHandler {
 	logger := cfg.Logger.With("node", cfg.Lnd.PubKey())
 
 	return &NodeSettledHandler{
-		logger:          logger,
-		persister:       cfg.Persister,
-		lnd:             cfg.Lnd,
-		settledCallback: cfg.SettledCallback,
+		logger:        logger,
+		persister:     cfg.Persister,
+		lnd:           cfg.Lnd,
+		finalCallback: cfg.FinalCallback,
 	}
 }
 
@@ -156,7 +156,7 @@ func (p *NodeSettledHandler) handleFinalHtlc(ctx context.Context,
 		"chanID", key.ChanID, "htlcID", key.HtlcID, "hash", settledHash)
 
 	if settledHash != nil {
-		p.settledCallback(*settledHash)
+		p.finalCallback(*settledHash, true)
 	}
 
 	return nil

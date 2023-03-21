@@ -246,7 +246,7 @@ func run(ctx context.Context, cfg *Config) error {
 				Logger:          log,
 				Registry:        registry,
 				Persister:       db,
-				SettledCallback: settledHandler.InvoiceSettled,
+				FinalCallback:   settledHandler.InvoiceSettled,
 				RoutingPolicy:   routingPolicy,
 			})
 		if err != nil {

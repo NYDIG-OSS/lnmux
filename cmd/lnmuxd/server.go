@@ -154,16 +154,16 @@ func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAccepted
 	}
 }
 
-func (s *server) WaitForInvoiceSettled(ctx context.Context,
-	req *lnmuxrpc.WaitForInvoiceSettledRequest) (
-	*lnmuxrpc.WaitForInvoiceSettledResponse, error) {
+func (s *server) WaitForInvoiceFinalStatus(ctx context.Context,
+	req *lnmuxrpc.WaitForInvoiceFinalStatusRequest) (
+	*lnmuxrpc.WaitForInvoiceFinalStatusResponse, error) {
 
 	hash, err := lntypes.MakeHash(req.Hash)
 	if err != nil {
 		return nil, err
 	}
 
-	err = s.settledHandler.WaitForInvoiceSettled(ctx, hash)
+	settled, err := s.settledHandler.WaitForInvoiceFinalStatus(ctx, hash)
 	switch {
 	case err == types.ErrInvoiceNotFound:
 		return nil, status.Error(
@@ -174,7 +174,16 @@ func (s *server) WaitForInvoiceSettled(ctx context.Context,
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 
-	return &lnmuxrpc.WaitForInvoiceSettledResponse{}, nil
+	var invoiceStatus lnmuxrpc.InvoiceStatus
+	if settled {
+		invoiceStatus = lnmuxrpc.InvoiceStatus_SETTLED
+	} else {
+		invoiceStatus = lnmuxrpc.InvoiceStatus_FAILED
+	}
+
+	return &lnmuxrpc.WaitForInvoiceFinalStatusResponse{
+		InvoiceStatus: invoiceStatus,
+	}, nil
 }
 
 func (s *server) AddInvoice(ctx context.Context,

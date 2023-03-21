@@ -225,7 +225,7 @@ func TestMux(t *testing.T) {
 			Lnd:             lnd,
 			Logger:          logger.Sugar(),
 			Registry:        registry,
-			SettledCallback: settledHandler.InvoiceSettled,
+			FinalCallback:   settledHandler.InvoiceSettled,
 			Persister:       db,
 			RoutingPolicy:   routingPolicy,
 		})
@@ -360,11 +360,10 @@ func TestMux(t *testing.T) {
 
 	setID := expectAccept(testHash)
 
-	// No settle requested yet and we expect WaitForInvoiceSettled to return an
+	// No settle requested yet and we expect WaitForInvoiceFinalStatus to return an
 	// error.
-	require.ErrorIs(t,
-		settledHandler.WaitForInvoiceSettled(context.Background(), testHash),
-		types.ErrInvoiceNotFound)
+	_, err = settledHandler.WaitForInvoiceFinalStatus(context.Background(), testHash)
+	require.ErrorIs(t, err, types.ErrInvoiceNotFound)
 
 	// Register for reconnect and disconnect the htlc notifier and interceptor.
 	l[0].notifierConnectedChanEnabled.Store(true)
@@ -387,10 +386,9 @@ func TestMux(t *testing.T) {
 	// Wait for invoice-level settle signal.
 	settledChan := make(chan struct{})
 	go func() {
-		assert.NoError(t,
-			settledHandler.WaitForInvoiceSettled(
-				context.Background(), testHash,
-			))
+		settled, err := settledHandler.WaitForInvoiceFinalStatus(context.Background(), testHash)
+		assert.NoError(t, err)
+		assert.True(t, settled)
 
 		close(settledChan)
 	}()
@@ -417,9 +415,9 @@ func TestMux(t *testing.T) {
 	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[0].Status)
 
 	// Waiting for settle again should return immediately with success.
-	require.NoError(t, settledHandler.WaitForInvoiceSettled(
-		context.Background(), testHash,
-	))
+	settled, err := settledHandler.WaitForInvoiceFinalStatus(context.Background(), testHash)
+	require.NoError(t, err)
+	require.True(t, settled)
 
 	_, htlcs, err := db.Get(context.Background(), testHash)
 	require.NoError(t, err)
@@ -453,9 +451,9 @@ func TestMux(t *testing.T) {
 	l[0].notifyFinal(20)
 
 	// Waiting for settle again should return immediately with success.
-	require.NoError(t, settledHandler.WaitForInvoiceSettled(
-		context.Background(), testHash,
-	))
+	settled, err = settledHandler.WaitForInvoiceFinalStatus(context.Background(), testHash)
+	require.NoError(t, err)
+	require.True(t, settled)
 
 	// Should have 2 invoices in the response
 	dbInvoices, err = db.GetInvoices(context.Background(), 3, 0)
