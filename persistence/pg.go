@@ -14,7 +14,21 @@ import (
 	"go.uber.org/zap"
 )
 
-var ErrHtlcAlreadySettled = errors.New("htlc already settled")
+var (
+	// ErrHtlcAlreadyFinal is an error returned when we try to finalize a
+	// htlc, but its status was already changed.
+	ErrHtlcAlreadyFinal = errors.New("htlc already in its final status")
+
+	// ErrHtlcReceivedButInvoiceAlreadySettled is an error returned when we
+	// received a htlc for an invoice that is already settled.
+	ErrHtlcReceivedButInvoiceAlreadySettled = errors.New("htlc " +
+		"received but invoice already settled")
+
+	// ErrFinalizationFailed is an error returned when we try to finalize
+	// an invoice, but it fails.
+	ErrFinalizationFailed = errors.New("cannot mark the invoice as" +
+		"finalized")
+)
 
 type Invoice struct {
 	InvoiceCreationData
@@ -249,45 +263,65 @@ func (p *PostgresPersister) getHtlcHash(ctx context.Context, tx *pg.Tx,
 	return htlc.Hash, nil
 }
 
-func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
-	key types.HtlcKey) (*lntypes.Hash, error) {
+func (p *PostgresPersister) MarkHtlcFinal(ctx context.Context,
+	key types.HtlcKey, settled bool) (*lntypes.Hash, error) {
 
-	var settledHash *lntypes.Hash
+	var invoiceHash *lntypes.Hash
 
 	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
-		// Select invoice FOR UPDATE to prevent incorrect counts when multiple
-		// htlcs for the same invoice are marked as settled concurrently.
+		// Select invoice FOR UPDATE to prevent concurrent update on the
+		// invoice/htlc.
 		invoice, err := p.selectInvoiceForUpdate(ctx, tx, key)
 		if err != nil {
 			return err
 		}
 
+		// If invoice has InvoiceStatusSettled status, it means that all
+		// HTLC were settled earlier and MarkHtlcFinal should not have
+		// been called again for this invoice.
+		if invoice.Status == types.InvoiceStatusSettled {
+			return ErrHtlcReceivedButInvoiceAlreadySettled
+		}
+
 		now := time.Now().UTC()
 
-		// Settle the HTLC in the database.
-		err = p.finalizeHTLC(ctx, tx, key, true, now)
+		err = p.finalizeHTLC(ctx, tx, key, settled, now)
 		if err != nil {
 			return err
 		}
 
-		// The HTLC is settled, now we check if all other HTLCs
-		// are settled as well.
-		allHtlcsSettled, err := p.allHtlcsAreSettled(ctx,
-			tx, invoice.Hash)
-		if err != nil {
-			return err
-		}
-		if !allHtlcsSettled {
+		// It is possible that we received previously a HTLC that has
+		// failed for this invoice. In consequence, the invoice should
+		// have the FAILED status. However, a HTLC could have reached
+		// its final status afterward.
+		// We return nil here instead of the invoice hash to avoid
+		// notifying the user as the final event already happened
+		// earlier.
+		if invoice.Status == types.InvoiceStatusFailed {
 			return nil
 		}
 
-		// If all htlcs are settled, settle the invoice.
-		err = p.finalizeInvoice(ctx, tx, invoice.Hash, true, now)
+		if settled {
+			// The HTLC is settled, now we check if all other HTLCs
+			// are settled as well. If all htlcs are settled, then
+			// we can settle the invoice.
+			allHtlcsSettled, err := p.allHtlcsAreSettled(ctx,
+				tx, invoice.Hash)
+			if err != nil {
+				return err
+			}
+			if !allHtlcsSettled {
+				return nil
+			}
+		}
+
+		err = p.finalizeInvoice(ctx, tx, invoice.Hash,
+			settled, now)
 		if err != nil {
 			return err
 		}
 
-		settledHash = &invoice.Hash
+		invoiceHash = &invoice.Hash
 
 		return nil
 	})
@@ -295,7 +329,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 		return nil, err
 	}
 
-	return settledHash, nil
+	return invoiceHash, nil
 }
 
 func (p *PostgresPersister) selectInvoiceForUpdate(ctx context.Context,
@@ -352,7 +386,7 @@ func (p *PostgresPersister) finalizeHTLC(ctx context.Context,
 		return err
 	}
 	if result.RowsAffected() == 0 {
-		return ErrHtlcAlreadySettled
+		return ErrHtlcAlreadyFinal
 	}
 
 	return nil
@@ -371,6 +405,7 @@ func (p *PostgresPersister) finalizeInvoice(ctx context.Context,
 
 	result, err := tx.ModelContext(ctx, (*dbInvoice)(nil)).
 		Where("hash=?", hash).
+		Where("status=?", types.InvoiceStatusSettleRequested).
 		Set("status=?", invoiceFinalStatus).
 		Set("finalized_at=?", finalizedAt).
 		Update() // nolint:contextcheck
@@ -378,7 +413,7 @@ func (p *PostgresPersister) finalizeInvoice(ctx context.Context,
 		return err
 	}
 	if result.RowsAffected() == 0 {
-		return types.ErrInvoiceNotFound
+		return ErrFinalizationFailed
 	}
 
 	return nil
