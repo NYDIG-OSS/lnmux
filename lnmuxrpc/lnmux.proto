@@ -94,7 +94,7 @@ message Invoice {
     bytes preimage = 2;
     uint64 amount_msat = 3;
     bool settled = 4;
-    uint64 settled_requested_at = 5;
+    uint64 settle_requested_at = 5;
     uint64 settled_at = 6;
     uint64 sequence_number = 7;
 }

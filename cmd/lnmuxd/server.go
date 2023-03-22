@@ -333,12 +333,12 @@ func dbInvoiceToProto(invoice *persistence.Invoice) *lnmuxrpc.Invoice {
 	preimage := invoice.PaymentPreimage.Hash()
 
 	return &lnmuxrpc.Invoice{
-		Hash:               invoice.PaymentPreimage[:],
-		Preimage:           preimage[:],
-		AmountMsat:         uint64(invoice.InvoiceCreationData.Value),
-		Settled:            invoice.Settled,
-		SettledRequestedAt: uint64(invoice.SettleRequestedAt.Unix()),
-		SettledAt:          uint64(invoice.SettledAt.Unix()),
-		SequenceNumber:     invoice.SequenceNum,
+		Hash:              invoice.PaymentPreimage[:],
+		Preimage:          preimage[:],
+		AmountMsat:        uint64(invoice.InvoiceCreationData.Value),
+		Settled:           invoice.Settled,
+		SettleRequestedAt: uint64(invoice.SettleRequestedAt.Unix()),
+		SettledAt:         uint64(invoice.SettledAt.Unix()),
+		SequenceNumber:    invoice.SequenceNum,
 	}
 }

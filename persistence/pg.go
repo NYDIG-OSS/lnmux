@@ -25,13 +25,6 @@ type Invoice struct {
 	Settled           bool
 }
 
-type InvoiceState int
-
-const (
-	InvoiceStateAccepted InvoiceState = iota
-	InvoiceStateSettleRequested
-)
-
 type InvoiceCreationData struct {
 	types.InvoiceCreationData
 }
@@ -226,54 +219,23 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 	var invoiceSettled bool
 
 	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
-		// Look up the htlc hash.
-		hash, err := p.getHtlcHash(ctx, tx, key)
-		if err != nil {
-			return err
-		}
-
 		// Select invoice FOR UPDATE to prevent incorrect counts when multiple
 		// htlcs for the same invoice are marked as settled concurrently.
-		var invoice dbInvoice
-		err = tx.ModelContext(ctx, &invoice).
-			Where("hash=?", hash).
-			For("UPDATE").
-			Select()
-		switch {
-		case err == pg.ErrNoRows:
-			return types.ErrInvoiceNotFound
-
-		case err != nil:
+		invoice, err := p.selectInvoiceForUpdate(ctx, tx, key)
+		if err != nil {
 			return err
 		}
 
 		now := time.Now().UTC()
 
-		htlc := dbHtlc{
-			Node:   key.Node,
-			ChanID: key.ChanID,
-			HtlcID: key.HtlcID,
-		}
-
-		// Mark htlc as settled. If the htlc is not found at this point, is must
-		// have been settled already. We were able to retrieve it earlier so it
-		// exists.
-		result, err := tx.ModelContext(ctx, &htlc).
-			WherePK().
-			Where("settled=?", false).
-			Set("settled=?", true).
-			Set("settled_at=?", now).
-			Update() // nolint:contextcheck
-		if err != nil {
+		// Settle the HTLC in the database.
+		if err := p.settleHTLC(ctx, tx, key, now); err != nil {
 			return err
-		}
-		if result.RowsAffected() == 0 {
-			return ErrHtlcAlreadySettled
 		}
 
 		// Count number of htlcs that are not yet settled.
 		count, err := tx.ModelContext(ctx, (*dbHtlc)(nil)).
-			Where("hash=?", hash).
+			Where("hash=?", invoice.Hash).
 			Where("settled=?", false).
 			Count()
 		if err != nil {
@@ -285,8 +247,8 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 		}
 
 		// If all htlcs are settled, mark the invoice as settled.
-		_, err = tx.ModelContext(ctx, (*dbInvoice)(nil)).
-			Where("hash=?", hash).
+		result, err := tx.ModelContext(ctx, (*dbInvoice)(nil)).
+			Where("hash=?", invoice.Hash).
 			Set("settled=?", true).
 			Set("settled_at=?", now).
 			Update() // nolint:contextcheck
@@ -306,6 +268,59 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 	}
 
 	return invoiceSettled, nil
+}
+
+func (p *PostgresPersister) selectInvoiceForUpdate(ctx context.Context,
+	tx *pg.Tx, key types.HtlcKey) (*dbInvoice, error) {
+
+	// Look up the htlc hash.
+	hash, err := p.getHtlcHash(ctx, tx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	var invoice dbInvoice
+	err = tx.ModelContext(ctx, &invoice).
+		Where("hash=?", hash).
+		For("UPDATE").
+		Select()
+	switch {
+	case err == pg.ErrNoRows:
+		return nil, types.ErrInvoiceNotFound
+
+	case err != nil:
+		return nil, err
+	}
+
+	return &invoice, nil
+}
+
+func (p *PostgresPersister) settleHTLC(ctx context.Context,
+	tx *pg.Tx, key types.HtlcKey, settledAt time.Time) error {
+
+	htlc := dbHtlc{
+		Node:   key.Node,
+		ChanID: key.ChanID,
+		HtlcID: key.HtlcID,
+	}
+
+	// Mark htlc as settled. If the htlc is not found at this point, is must
+	// have been settled already. We were able to retrieve it earlier so it
+	// exists.
+	result, err := tx.ModelContext(ctx, &htlc).
+		WherePK().
+		Where("settled=?", false).
+		Set("settled=?", true).
+		Set("settled_at=?", settledAt).
+		Update() // nolint:contextcheck
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrHtlcAlreadySettled
+	}
+
+	return nil
 }
 
 // Ping pings the database connection to ensure it is available

@@ -1124,7 +1124,7 @@ func (m *Invoice) Validate() error {
 
 	// no validation rules for Settled
 
-	// no validation rules for SettledRequestedAt
+	// no validation rules for SettleRequestedAt
 
 	// no validation rules for SettledAt
 
