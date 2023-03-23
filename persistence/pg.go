@@ -269,30 +269,22 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			return err
 		}
 
-		// Count number of htlcs that are not yet settled.
-		count, err := tx.ModelContext(ctx, (*dbHtlc)(nil)).
-			Where("hash=?", invoice.Hash).
-			Where("status=?", types.HtlcStatusSettleRequested).
-			Count()
+		// The HTLC is settled, now we check if all other HTLCs
+		// are settled as well.
+		allHtlcsSettled, err := p.allHtlcsAreSettled(ctx,
+			tx, invoice.Hash)
 		if err != nil {
 			return err
 		}
-
-		if count != 0 {
+		if !allHtlcsSettled {
 			return nil
 		}
 
-		// If all htlcs are settled, mark the invoice as settled.
-		result, err := tx.ModelContext(ctx, (*dbInvoice)(nil)).
-			Where("hash=?", invoice.Hash).
-			Set("status=?", types.InvoiceStatusSettled).
-			Set("finalized_at=?", now).
-			Update() // nolint:contextcheck
+		// If all htlcs are settled, settle the invoice.
+		err = p.changeInvoiceStatus(ctx, tx, invoice.Hash,
+			types.InvoiceStatusSettled, now)
 		if err != nil {
 			return err
-		}
-		if result.RowsAffected() == 0 {
-			return types.ErrInvoiceNotFound
 		}
 
 		settledHash = &invoice.Hash
@@ -357,6 +349,40 @@ func (p *PostgresPersister) settleHTLC(ctx context.Context,
 	}
 
 	return nil
+}
+
+func (p *PostgresPersister) changeInvoiceStatus(ctx context.Context,
+	tx *pg.Tx, hash lntypes.Hash, status types.InvoiceStatus,
+	finalizedAt time.Time) error {
+
+	result, err := tx.ModelContext(ctx, (*dbInvoice)(nil)).
+		Where("hash=?", hash).
+		Set("status=?", status).
+		Set("finalized_at=?", finalizedAt).
+		Update() // nolint:contextcheck
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return types.ErrInvoiceNotFound
+	}
+
+	return nil
+}
+
+func (p *PostgresPersister) allHtlcsAreSettled(ctx context.Context,
+	tx *pg.Tx, hash lntypes.Hash) (bool, error) {
+
+	// Count number of htlcs that are not yet settled.
+	count, err := tx.ModelContext(ctx, (*dbHtlc)(nil)).
+		Where("hash=?", hash).
+		Where("status=?", types.HtlcStatusSettleRequested).
+		Count()
+	if err != nil {
+		return false, err
+	}
+
+	return count == 0, nil
 }
 
 // Ping pings the database connection to ensure it is available
