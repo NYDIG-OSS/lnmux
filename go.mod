@@ -106,7 +106,7 @@ require (
 	github.com/lightningnetwork/lnd/kvdb v1.3.1 // indirect
 	github.com/lightningnetwork/lnd/ticker v1.1.0 // indirect
 	github.com/lightningnetwork/lnd/tlv v1.0.3 // indirect
-	github.com/lightningnetwork/lnd/tor v1.0.1 // indirect
+	github.com/lightningnetwork/lnd/tor v1.1.0 // indirect
 	github.com/ltcsuite/ltcd v0.20.1-beta // indirect
 	github.com/mailru/easyjson v0.7.6 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
@@ -185,3 +185,5 @@ require (
 )
 
 replace github.com/bottlepay/lnmux/lnmuxrpc => ./lnmuxrpc
+
+replace github.com/lightningnetwork/lnd => /users/Joost.Jager/lightninglabs/lnd

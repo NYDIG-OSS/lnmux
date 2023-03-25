@@ -176,10 +176,11 @@ func (i *interceptor) start(ctx context.Context) error {
 					ChanId: item.incomingKey.ChanID,
 					HtlcId: item.incomingKey.HtlcID,
 				},
-				Action:         item.resp.action,
-				Preimage:       item.resp.preimage[:],
-				FailureMessage: item.resp.failureMessage,
-				FailureCode:    item.resp.failureCode,
+				Action:                    item.resp.action,
+				Preimage:                  item.resp.preimage[:],
+				FailureMessage:            item.resp.failureMessage,
+				FailureCode:               item.resp.failureCode,
+				FailureMessageUnencrypted: item.resp.failureMessageUnencrypted,
 			}
 
 			if err := send(rpcResp); err != nil {

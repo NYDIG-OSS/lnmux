@@ -434,8 +434,6 @@ github.com/lightninglabs/neutrino v0.14.2 h1:yrnZUCYMZ5ECtXhgDrzqPq2oX8awoAN2D/c
 github.com/lightninglabs/neutrino v0.14.2/go.mod h1:OICUeTCn+4Tu27YRJIpWvvqySxx4oH4vgdP33Sw9RDc=
 github.com/lightningnetwork/lightning-onion v1.0.2-0.20220211021909-bb84a1ccb0c5 h1:TkKwqFcQTGYoI+VEqyxA8rxpCin8qDaYX0AfVRinT3k=
 github.com/lightningnetwork/lightning-onion v1.0.2-0.20220211021909-bb84a1ccb0c5/go.mod h1:7dDx73ApjEZA0kcknI799m2O5kkpfg4/gr7N092ojNo=
-github.com/lightningnetwork/lnd v0.15.4-beta h1:vO+UZjuA8RqJdDlfwQeS0h2PCocYwwqv5HkX2IXf5/M=
-github.com/lightningnetwork/lnd v0.15.4-beta/go.mod h1:6aoOkifcI9tuk8UV5l2rVZSq0681obuP4zvfK+2ZrT0=
 github.com/lightningnetwork/lnd/clock v1.0.1/go.mod h1:KnQudQ6w0IAMZi1SgvecLZQZ43ra2vpDNj7H/aasemg=
 github.com/lightningnetwork/lnd/clock v1.1.0 h1:/yfVAwtPmdx45aQBoXQImeY7sOIEr7IXlImRMBOZ7GQ=
 github.com/lightningnetwork/lnd/clock v1.1.0/go.mod h1:KnQudQ6w0IAMZi1SgvecLZQZ43ra2vpDNj7H/aasemg=
@@ -454,8 +452,8 @@ github.com/lightningnetwork/lnd/tlv v1.0.2/go.mod h1:fICAfsqk1IOsC1J7G9IdsWX1EqW
 github.com/lightningnetwork/lnd/tlv v1.0.3 h1:0xBZcPuXagP6f7TY/RnLNR4igE21ov6qUdTr5NyvhhI=
 github.com/lightningnetwork/lnd/tlv v1.0.3/go.mod h1:dzR/aZetBri+ZY/fHbwV06fNn/3UID6htQzbHfREFdo=
 github.com/lightningnetwork/lnd/tor v1.0.0/go.mod h1:RDtaAdwfAm+ONuPYwUhNIH1RAvKPv+75lHPOegUcz64=
-github.com/lightningnetwork/lnd/tor v1.0.1 h1:A11FrpU0Y//g+fA827W4VnjOeoIvExONdchlLX8wYkA=
-github.com/lightningnetwork/lnd/tor v1.0.1/go.mod h1:RDtaAdwfAm+ONuPYwUhNIH1RAvKPv+75lHPOegUcz64=
+github.com/lightningnetwork/lnd/tor v1.1.0 h1:iXO7fSzjxTI+p88KmtpbuyuRJeNfgtpl9QeaAliILXE=
+github.com/lightningnetwork/lnd/tor v1.1.0/go.mod h1:RDtaAdwfAm+ONuPYwUhNIH1RAvKPv+75lHPOegUcz64=
 github.com/ltcsuite/ltcd v0.20.1-beta h1:ka9ZwUG7oUPppl+7ptuh5VDxGD7TWEJXu/IOOOz1yfY=
 github.com/ltcsuite/ltcd v0.20.1-beta/go.mod h1:ZFQaYdYULIuTQiWqs7AUiHD2XhDFeeHW1IH+UYMdABU=
 github.com/ltcsuite/ltcutil v0.0.0-20191227053721-6bec450ea6ad/go.mod h1:8Vg/LTOO0KYa/vlHWJ6XZAevPQThGH5sufO0Hrou/lA=
