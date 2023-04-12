@@ -4,10 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/bottlepay/lnmux/common"
+	"github.com/bottlepay/lnmux/lnd"
 	"github.com/bottlepay/lnmux/persistence"
-	"github.com/bottlepay/lnmux/types"
-	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"go.uber.org/zap"
 )
@@ -15,11 +13,13 @@ import (
 type SettledHandlerConfig struct {
 	Persister *persistence.PostgresPersister
 	Logger    *zap.SugaredLogger
+	Lnds      []lnd.LndClient
 }
 
 type SettledHandler struct {
 	persister *persistence.PostgresPersister
 	logger    *zap.SugaredLogger
+	lnds      []lnd.LndClient
 
 	waiters     map[lntypes.Hash][]chan struct{}
 	waitersLock sync.Mutex
@@ -29,50 +29,23 @@ func NewSettledHandler(cfg *SettledHandlerConfig) *SettledHandler {
 	return &SettledHandler{
 		logger:    cfg.Logger,
 		persister: cfg.Persister,
+		lnds:      cfg.Lnds,
 		waiters:   make(map[lntypes.Hash][]chan struct{}),
 	}
 }
 
-func (p *SettledHandler) preSendHandler(ctx context.Context, node common.PubKey,
-	item queuedReply) error {
+func (p *SettledHandler) InvoiceSettled(hash lntypes.Hash) {
+	p.waitersLock.Lock()
 
-	if item.resp.action != routerrpc.ResolveHoldForwardAction_SETTLE {
-		return nil
+	waiters := p.waiters[hash]
+
+	p.logger.Infow("Invoice settled", "hash", hash, "waiters", len(waiters))
+
+	for _, waiter := range waiters {
+		close(waiter)
 	}
-
-	htlcKey := types.HtlcKey{
-		Node:   node,
-		ChanID: item.incomingKey.ChanID,
-		HtlcID: item.incomingKey.HtlcID,
-	}
-
-	invoiceSettled, err := p.persister.MarkHtlcSettled(ctx, htlcKey)
-	switch {
-	// If htlc is already marked as settled, exit early. This can happen when
-	// the settle instruction didn't reach lnd in a previous run.
-	case err == persistence.ErrHtlcAlreadySettled:
-		return nil
-
-	case err != nil:
-		return err
-	}
-
-	if invoiceSettled {
-		p.waitersLock.Lock()
-
-		waiters := p.waiters[item.hash]
-
-		p.logger.Infow("Invoice settled",
-			"hash", item.hash, "waiters", len(waiters))
-
-		for _, waiter := range waiters {
-			close(waiter)
-		}
-		p.waiters[item.hash] = nil
-		p.waitersLock.Unlock()
-	}
-
-	return nil
+	p.waiters[hash] = nil
+	p.waitersLock.Unlock()
 }
 
 func (p *SettledHandler) WaitForInvoiceSettled(ctx context.Context,

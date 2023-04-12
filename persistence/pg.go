@@ -153,6 +153,38 @@ func (p *PostgresPersister) GetInvoices(ctx context.Context,
 	return invoices, nil
 }
 
+// GetPendingHtlcs returns all htlcs for a node that are requested to be
+// settled, but not yet settled.
+func (p *PostgresPersister) GetPendingHtlcs(ctx context.Context, node common.PubKey) (
+	map[types.CircuitKey]struct{}, error) {
+
+	var htlcs = make(map[types.CircuitKey]struct{})
+	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		var dbHtlcs []*dbHtlc
+		err := tx.ModelContext(ctx, &dbHtlcs).
+			Where("node=?", node).
+			Where("settled=?", false).
+			Select()
+		if err != nil {
+			return err
+		}
+
+		for _, htlc := range dbHtlcs {
+			htlcs[types.CircuitKey{
+				ChanID: htlc.ChanID,
+				HtlcID: htlc.HtlcID,
+			}] = struct{}{}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return htlcs, nil
+}
+
 func (p *PostgresPersister) RequestSettle(ctx context.Context,
 	invoice *InvoiceCreationData, htlcs map[types.HtlcKey]int64) error {
 
@@ -214,9 +246,9 @@ func (p *PostgresPersister) getHtlcHash(ctx context.Context, tx *pg.Tx,
 }
 
 func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
-	key types.HtlcKey) (bool, error) {
+	key types.HtlcKey) (*lntypes.Hash, error) {
 
-	var invoiceSettled bool
+	var settledHash *lntypes.Hash
 
 	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
 		// Select invoice FOR UPDATE to prevent incorrect counts when multiple
@@ -259,15 +291,15 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 			return types.ErrInvoiceNotFound
 		}
 
-		invoiceSettled = true
+		settledHash = &invoice.Hash
 
 		return nil
 	})
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
-	return invoiceSettled, nil
+	return settledHash, nil
 }
 
 func (p *PostgresPersister) selectInvoiceForUpdate(ctx context.Context,

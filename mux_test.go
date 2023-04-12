@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,11 +43,15 @@ var (
 )
 
 type testLndClient struct {
-	client       *lnd.MockLndClient
-	htlcChan     chan *routerrpc.ForwardHtlcInterceptRequest
-	responseChan chan *routerrpc.ForwardHtlcInterceptResponse
-	blockChan    chan *chainrpc.BlockEpoch
-	closeChan    chan struct{}
+	client                       *lnd.MockLndClient
+	htlcChan                     chan *routerrpc.ForwardHtlcInterceptRequest
+	responseChan                 chan *routerrpc.ForwardHtlcInterceptResponse
+	blockChan                    chan *chainrpc.BlockEpoch
+	closeInterceptorChan         chan struct{}
+	closeNotifierChan            chan struct{}
+	notifierConnectedChan        chan struct{}
+	notifierConnectedChanEnabled atomic.Bool
+	finalChan                    chan *routerrpc.HtlcEvent
 }
 
 func createTestLndClient(ctrl *gomock.Controller,
@@ -57,7 +62,46 @@ func createTestLndClient(ctrl *gomock.Controller,
 
 	htlcChan := make(chan *routerrpc.ForwardHtlcInterceptRequest)
 	responseChan := make(chan *routerrpc.ForwardHtlcInterceptResponse, 1)
-	closeChan := make(chan struct{})
+	closeInterceptorChan := make(chan struct{})
+	closeNotifierChan := make(chan struct{})
+	notifierConnectedChan := make(chan struct{})
+	finalChan := make(chan *routerrpc.HtlcEvent)
+	blockChan := make(chan *chainrpc.BlockEpoch)
+
+	testLnd := &testLndClient{
+		client:                lndClient,
+		htlcChan:              htlcChan,
+		responseChan:          responseChan,
+		blockChan:             blockChan,
+		closeInterceptorChan:  closeInterceptorChan,
+		closeNotifierChan:     closeNotifierChan,
+		notifierConnectedChan: notifierConnectedChan,
+		finalChan:             finalChan,
+	}
+
+	lndClient.EXPECT().HtlcNotifier(gomock.Any()).
+		DoAndReturn(func(ctx context.Context) (func() (*routerrpc.HtlcEvent, error), error) {
+			recv := func() (*routerrpc.HtlcEvent, error) {
+				// Signal connection event if requested.
+				if testLnd.notifierConnectedChanEnabled.CompareAndSwap(true, false) {
+					testLnd.notifierConnectedChan <- struct{}{}
+				}
+
+				select {
+				case event := <-finalChan:
+					return event, nil
+
+				case <-ctx.Done():
+					return nil, ctx.Err()
+
+				case <-closeNotifierChan:
+					return nil, errors.New("connection closed")
+				}
+			}
+
+			return recv, nil
+		}).AnyTimes()
+
 	lndClient.EXPECT().HtlcInterceptor(gomock.Any()).
 		DoAndReturn(func(ctx context.Context) (
 			func(*routerrpc.ForwardHtlcInterceptResponse) error,
@@ -77,23 +121,27 @@ func createTestLndClient(ctrl *gomock.Controller,
 					case <-ctx.Done():
 						return nil, ctx.Err()
 
-					case <-closeChan:
+					case <-closeInterceptorChan:
 						return nil, errors.New("connection closed")
 					}
 				},
 				nil
 		}).AnyTimes()
 
-	blockChan := make(chan *chainrpc.BlockEpoch)
 	lndClient.EXPECT().RegisterBlockEpochNtfn(gomock.Any()).
 		Return(blockChan, nil, nil).AnyTimes()
 
-	return &testLndClient{
-		client:       lndClient,
-		htlcChan:     htlcChan,
-		responseChan: responseChan,
-		blockChan:    blockChan,
-		closeChan:    closeChan,
+	return testLnd
+}
+
+func (t *testLndClient) notifyFinal(htlcID uint64) {
+	t.finalChan <- &routerrpc.HtlcEvent{
+		IncomingHtlcId: htlcID,
+		Event: &routerrpc.HtlcEvent_FinalHtlcEvent{
+			FinalHtlcEvent: &routerrpc.FinalHtlcEvent{
+				Settled: true,
+			},
+		},
 	}
 }
 
@@ -168,14 +216,17 @@ func TestMux(t *testing.T) {
 		errChan <- registry.Run(ctx)
 	}()
 
-	for _, lnd := range []lnd.LndClient{l[0].client, l[1].client} {
+	for _, testLnd := range []*testLndClient{l[0], l[1]} {
+		lnd := testLnd.client
+
 		mux, err := New(&MuxConfig{
 			KeyRing:         keyRing,
 			ActiveNetParams: activeNetParams,
 			Lnd:             lnd,
 			Logger:          logger.Sugar(),
 			Registry:        registry,
-			SettledHandler:  settledHandler,
+			SettledCallback: settledHandler.InvoiceSettled,
+			Persister:       db,
 			RoutingPolicy:   routingPolicy,
 		})
 		require.NoError(t, err)
@@ -315,17 +366,23 @@ func TestMux(t *testing.T) {
 		settledHandler.WaitForInvoiceSettled(context.Background(), testHash),
 		types.ErrInvoiceNotFound)
 
-	// Disconnect htlc interceptor.
-	l[0].closeChan <- struct{}{}
+	// Register for reconnect and disconnect the htlc notifier and interceptor.
+	l[0].notifierConnectedChanEnabled.Store(true)
 
-	// Wait for disconnect to be processed.
-	time.Sleep(time.Second)
+	l[0].closeNotifierChan <- struct{}{}
+	l[0].closeInterceptorChan <- struct{}{}
+
+	// Wait for reconnect.
+	<-l[0].notifierConnectedChan
 
 	// Request settle, even though node 1 is still offline.
 	require.NoError(t, registry.RequestSettle(testHash, setID))
 
 	// Expect a settle signal for node 2.
 	expectResponse(<-l[1].responseChan, 2, routerrpc.ResolveHoldForwardAction_SETTLE)
+
+	// Notify final htlc resolution for htlc 2 on node 2.
+	l[1].notifyFinal(2)
 
 	// Wait for invoice-level settle signal.
 	settledChan := make(chan struct{})
@@ -345,6 +402,9 @@ func TestMux(t *testing.T) {
 
 	// Expect the other htlc to be settled on node 1 now.
 	expectResponse(<-l[0].responseChan, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
+
+	// Notify final htlc resolution for htlc 1 on node 1.
+	l[0].notifyFinal(1)
 
 	// Also the settle event is expected now.
 	<-settledChan
@@ -388,6 +448,9 @@ func TestMux(t *testing.T) {
 	require.NoError(t, registry.RequestSettle(testHash, setID))
 
 	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_SETTLE)
+
+	// Notify final htlc resolution for htlc 20 on node 1.
+	l[0].notifyFinal(20)
 
 	// Waiting for settle again should return immediately with success.
 	require.NoError(t, settledHandler.WaitForInvoiceSettled(

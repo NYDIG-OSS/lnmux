@@ -9,6 +9,7 @@ import (
 	reflect "reflect"
 
 	common "github.com/bottlepay/lnmux/common"
+	types "github.com/bottlepay/lnmux/types"
 	chaincfg "github.com/btcsuite/btcd/chaincfg"
 	gomock "github.com/golang/mock/gomock"
 	chainrpc "github.com/lightningnetwork/lnd/lnrpc/chainrpc"
@@ -52,6 +53,36 @@ func (m *MockLndClient) HtlcInterceptor(arg0 context.Context) (func(*routerrpc.F
 func (mr *MockLndClientMockRecorder) HtlcInterceptor(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HtlcInterceptor", reflect.TypeOf((*MockLndClient)(nil).HtlcInterceptor), arg0)
+}
+
+// HtlcNotifier mocks base method.
+func (m *MockLndClient) HtlcNotifier(arg0 context.Context) (func() (*routerrpc.HtlcEvent, error), error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HtlcNotifier", arg0)
+	ret0, _ := ret[0].(func() (*routerrpc.HtlcEvent, error))
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HtlcNotifier indicates an expected call of HtlcNotifier.
+func (mr *MockLndClientMockRecorder) HtlcNotifier(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HtlcNotifier", reflect.TypeOf((*MockLndClient)(nil).HtlcNotifier), arg0)
+}
+
+// LookupHtlc mocks base method.
+func (m *MockLndClient) LookupHtlc(arg0 context.Context, arg1 types.CircuitKey) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LookupHtlc", arg0, arg1)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// LookupHtlc indicates an expected call of LookupHtlc.
+func (mr *MockLndClientMockRecorder) LookupHtlc(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LookupHtlc", reflect.TypeOf((*MockLndClient)(nil).LookupHtlc), arg0, arg1)
 }
 
 // Network mocks base method.
