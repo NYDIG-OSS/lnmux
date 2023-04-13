@@ -154,16 +154,16 @@ func (s *server) SubscribeInvoiceAccepted(req *lnmuxrpc.SubscribeInvoiceAccepted
 	}
 }
 
-func (s *server) WaitForInvoiceSettled(ctx context.Context,
-	req *lnmuxrpc.WaitForInvoiceSettledRequest) (
-	*lnmuxrpc.WaitForInvoiceSettledResponse, error) {
+func (s *server) WaitForInvoiceFinalStatus(ctx context.Context,
+	req *lnmuxrpc.WaitForInvoiceFinalStatusRequest) (
+	*lnmuxrpc.WaitForInvoiceFinalStatusResponse, error) {
 
 	hash, err := lntypes.MakeHash(req.Hash)
 	if err != nil {
 		return nil, err
 	}
 
-	err = s.settledHandler.WaitForInvoiceSettled(ctx, hash)
+	settled, err := s.settledHandler.WaitForInvoiceFinalStatus(ctx, hash)
 	switch {
 	case err == types.ErrInvoiceNotFound:
 		return nil, status.Error(
@@ -174,7 +174,16 @@ func (s *server) WaitForInvoiceSettled(ctx context.Context,
 		return nil, status.Errorf(codes.Internal, err.Error())
 	}
 
-	return &lnmuxrpc.WaitForInvoiceSettledResponse{}, nil
+	var invoiceStatus lnmuxrpc.InvoiceStatus
+	if settled {
+		invoiceStatus = lnmuxrpc.InvoiceStatus_SETTLED
+	} else {
+		invoiceStatus = lnmuxrpc.InvoiceStatus_FAILED
+	}
+
+	return &lnmuxrpc.WaitForInvoiceFinalStatusResponse{
+		InvoiceStatus: invoiceStatus,
+	}, nil
 }
 
 func (s *server) AddInvoice(ctx context.Context,
@@ -336,9 +345,23 @@ func dbInvoiceToProto(invoice *persistence.Invoice) *lnmuxrpc.Invoice {
 		Hash:              invoice.PaymentPreimage[:],
 		Preimage:          preimage[:],
 		AmountMsat:        uint64(invoice.InvoiceCreationData.Value),
-		Settled:           invoice.Settled,
+		Status:            invoiceStatusToProto(invoice.Status),
 		SettleRequestedAt: uint64(invoice.SettleRequestedAt.Unix()),
-		SettledAt:         uint64(invoice.SettledAt.Unix()),
+		FinalizedAt:       uint64(invoice.FinalizedAt.Unix()),
 		SequenceNumber:    invoice.SequenceNum,
 	}
+}
+
+func invoiceStatusToProto(invoiceStatus types.InvoiceStatus) lnmuxrpc.InvoiceStatus {
+	var status lnmuxrpc.InvoiceStatus
+	switch invoiceStatus {
+	case types.InvoiceStatusSettled:
+		status = lnmuxrpc.InvoiceStatus_SETTLED
+	case types.InvoiceStatusSettleRequested:
+		status = lnmuxrpc.InvoiceStatus_SETTLE_REQUESTED
+	case types.InvoiceStatusFailed:
+		status = lnmuxrpc.InvoiceStatus_FAILED
+	}
+
+	return status
 }

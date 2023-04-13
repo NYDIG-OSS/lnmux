@@ -134,12 +134,12 @@ func createTestLndClient(ctrl *gomock.Controller,
 	return testLnd
 }
 
-func (t *testLndClient) notifyFinal(htlcID uint64) {
+func (t *testLndClient) notifyFinal(htlcID uint64, settled bool) {
 	t.finalChan <- &routerrpc.HtlcEvent{
 		IncomingHtlcId: htlcID,
 		Event: &routerrpc.HtlcEvent_FinalHtlcEvent{
 			FinalHtlcEvent: &routerrpc.FinalHtlcEvent{
-				Settled: true,
+				Settled: settled,
 			},
 		},
 	}
@@ -225,7 +225,7 @@ func TestMux(t *testing.T) {
 			Lnd:             lnd,
 			Logger:          logger.Sugar(),
 			Registry:        registry,
-			SettledCallback: settledHandler.InvoiceSettled,
+			FinalCallback:   settledHandler.InvoiceSettled,
 			Persister:       db,
 			RoutingPolicy:   routingPolicy,
 		})
@@ -360,11 +360,10 @@ func TestMux(t *testing.T) {
 
 	setID := expectAccept(testHash)
 
-	// No settle requested yet and we expect WaitForInvoiceSettled to return an
+	// No settle requested yet and we expect WaitForInvoiceFinalStatus to return an
 	// error.
-	require.ErrorIs(t,
-		settledHandler.WaitForInvoiceSettled(context.Background(), testHash),
-		types.ErrInvoiceNotFound)
+	_, err = settledHandler.WaitForInvoiceFinalStatus(context.Background(), testHash)
+	require.ErrorIs(t, err, types.ErrInvoiceNotFound)
 
 	// Register for reconnect and disconnect the htlc notifier and interceptor.
 	l[0].notifierConnectedChanEnabled.Store(true)
@@ -382,15 +381,14 @@ func TestMux(t *testing.T) {
 	expectResponse(<-l[1].responseChan, 2, routerrpc.ResolveHoldForwardAction_SETTLE)
 
 	// Notify final htlc resolution for htlc 2 on node 2.
-	l[1].notifyFinal(2)
+	l[1].notifyFinal(2, true)
 
 	// Wait for invoice-level settle signal.
 	settledChan := make(chan struct{})
 	go func() {
-		assert.NoError(t,
-			settledHandler.WaitForInvoiceSettled(
-				context.Background(), testHash,
-			))
+		settled, err := settledHandler.WaitForInvoiceFinalStatus(context.Background(), testHash)
+		assert.NoError(t, err)
+		assert.True(t, settled)
 
 		close(settledChan)
 	}()
@@ -404,7 +402,7 @@ func TestMux(t *testing.T) {
 	expectResponse(<-l[0].responseChan, 1, routerrpc.ResolveHoldForwardAction_SETTLE)
 
 	// Notify final htlc resolution for htlc 1 on node 1.
-	l[0].notifyFinal(1)
+	l[0].notifyFinal(1, true)
 
 	// Also the settle event is expected now.
 	<-settledChan
@@ -414,12 +412,12 @@ func TestMux(t *testing.T) {
 	require.Len(t, dbInvoices, 1)
 	require.Equal(t, dbInvoices[0].SequenceNum, uint64(1))
 	require.Equal(t, dbInvoices[0].PaymentPreimage, invoice.PaymentPreimage)
-	require.True(t, dbInvoices[0].Settled)
+	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[0].Status)
 
 	// Waiting for settle again should return immediately with success.
-	require.NoError(t, settledHandler.WaitForInvoiceSettled(
-		context.Background(), testHash,
-	))
+	settled, err := settledHandler.WaitForInvoiceFinalStatus(context.Background(), testHash)
+	require.NoError(t, err)
+	require.True(t, settled)
 
 	_, htlcs, err := db.Get(context.Background(), testHash)
 	require.NoError(t, err)
@@ -450,23 +448,52 @@ func TestMux(t *testing.T) {
 	expectResponse(<-l[0].responseChan, 20, routerrpc.ResolveHoldForwardAction_SETTLE)
 
 	// Notify final htlc resolution for htlc 20 on node 1.
-	l[0].notifyFinal(20)
+	l[0].notifyFinal(20, true)
 
 	// Waiting for settle again should return immediately with success.
-	require.NoError(t, settledHandler.WaitForInvoiceSettled(
-		context.Background(), testHash,
-	))
+	settled, err = settledHandler.WaitForInvoiceFinalStatus(context.Background(), testHash)
+	require.NoError(t, err)
+	require.True(t, settled)
 
-	// Should have 2 invoices in the response
+	// Create a new invoice.
+	invoice, testPreimage3, err := creator.Create(
+		15000, time.Minute, "test 3", nil, 40,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, invoice)
+
+	testHash = testPreimage3.Hash()
+
+	receiveHtlc(0, 30, 15000)
+
+	setID = expectAccept(testHash)
+	require.NoError(t, registry.RequestSettle(testHash, setID))
+
+	expectResponse(<-l[0].responseChan, 30, routerrpc.ResolveHoldForwardAction_SETTLE)
+
+	// Notify final htlc resolution for htlc 30 on node 1.
+	// However, HTLC failed.
+	l[0].notifyFinal(30, false)
+
+	settled, err = settledHandler.WaitForInvoiceFinalStatus(
+		context.Background(), testHash,
+	)
+	require.NoError(t, err)
+	require.False(t, settled)
+
+	// Should have 3 invoices in the response
 	dbInvoices, err = db.GetInvoices(context.Background(), 3, 0)
 	require.NoError(t, err)
-	require.Len(t, dbInvoices, 2)
+	require.Len(t, dbInvoices, 3)
 	require.Equal(t, dbInvoices[0].SequenceNum, uint64(1))
 	require.Equal(t, dbInvoices[0].PaymentPreimage, testPreimage)
-	require.True(t, dbInvoices[0].Settled)
+	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[0].Status)
 	require.Equal(t, dbInvoices[1].SequenceNum, uint64(2))
 	require.Equal(t, dbInvoices[1].PaymentPreimage, testPreimage2)
-	require.True(t, dbInvoices[1].Settled)
+	require.Equal(t, types.InvoiceStatusSettled, dbInvoices[1].Status)
+	require.Equal(t, dbInvoices[2].SequenceNum, uint64(3))
+	require.Equal(t, dbInvoices[2].PaymentPreimage, testPreimage3)
+	require.Equal(t, types.InvoiceStatusFailed, dbInvoices[2].Status)
 
 	cancelAcceptSubscription()
 

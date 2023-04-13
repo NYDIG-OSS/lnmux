@@ -11,7 +11,7 @@ service Service {
 
     rpc SubscribeInvoiceAccepted (SubscribeInvoiceAcceptedRequest) returns (stream SubscribeInvoiceAcceptedResponse);
 
-    rpc WaitForInvoiceSettled (WaitForInvoiceSettledRequest) returns (WaitForInvoiceSettledResponse);
+    rpc WaitForInvoiceFinalStatus (WaitForInvoiceFinalStatusRequest) returns (WaitForInvoiceFinalStatusResponse);
 
     // Requests settlement for an accepted invoice. This call is idempotent.
     rpc SettleInvoice (SettleInvoiceRequest) returns (SettleInvoiceResponse);
@@ -58,11 +58,13 @@ message SubscribeInvoiceAcceptedResponse {
     bytes set_id = 2;
 }
 
-message WaitForInvoiceSettledRequest {
+message WaitForInvoiceFinalStatusRequest {
     bytes hash = 1;
 }
 
-message WaitForInvoiceSettledResponse {}
+message WaitForInvoiceFinalStatusResponse {
+    InvoiceStatus invoice_status = 1;
+}
 
 message SettleInvoiceRequest {
     bytes hash = 1;
@@ -89,12 +91,19 @@ message ListInvoicesResponse {
     uint64 last_sequence_number = 3;
 }
 
+enum InvoiceStatus {
+    UNKNOWN = 0;
+    FAILED = 1;
+    SETTLE_REQUESTED = 2;
+    SETTLED = 3;
+}
+
 message Invoice {
     bytes hash = 1;
     bytes preimage = 2;
     uint64 amount_msat = 3;
-    bool settled = 4;
+    InvoiceStatus status = 4;
     uint64 settle_requested_at = 5;
-    uint64 settled_at = 6;
+    uint64 finalized_at = 6;
     uint64 sequence_number = 7;
 }

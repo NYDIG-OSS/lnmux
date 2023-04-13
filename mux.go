@@ -36,7 +36,7 @@ type Mux struct {
 type MuxConfig struct {
 	KeyRing         keychain.SecretKeyRing
 	ActiveNetParams *chaincfg.Params
-	SettledCallback func(lntypes.Hash)
+	FinalCallback   func(lntypes.Hash, bool)
 	Persister       *persistence.PostgresPersister
 
 	Lnd      lnd.LndClient
@@ -83,10 +83,10 @@ func New(cfg *MuxConfig) (*Mux,
 	virtualChannel := virtualChannelFromNode(connectedNode)
 
 	settledHandlerCfg := &NodeSettledHandlerConfig{
-		Persister:       cfg.Persister,
-		Logger:          cfg.Logger,
-		Lnd:             cfg.Lnd,
-		SettledCallback: cfg.SettledCallback,
+		Persister:     cfg.Persister,
+		Logger:        cfg.Logger,
+		Lnd:           cfg.Lnd,
+		FinalCallback: cfg.FinalCallback,
 	}
 
 	settledHandler := NewNodeSettledHandler(settledHandlerCfg)

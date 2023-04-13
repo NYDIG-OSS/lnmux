@@ -14,15 +14,29 @@ import (
 	"go.uber.org/zap"
 )
 
-var ErrHtlcAlreadySettled = errors.New("htlc already settled")
+var (
+	// ErrHtlcAlreadyFinal is an error returned when we try to finalize a
+	// htlc, but its status was already changed.
+	ErrHtlcAlreadyFinal = errors.New("htlc already in its final status")
+
+	// ErrHtlcReceivedButInvoiceAlreadySettled is an error returned when we
+	// received a htlc for an invoice that is already settled.
+	ErrHtlcReceivedButInvoiceAlreadySettled = errors.New("htlc " +
+		"received but invoice already settled")
+
+	// ErrFinalizationFailed is an error returned when we try to finalize
+	// an invoice, but it fails.
+	ErrFinalizationFailed = errors.New("cannot mark the invoice as" +
+		"finalized")
+)
 
 type Invoice struct {
 	InvoiceCreationData
 
 	SequenceNum       uint64
 	SettleRequestedAt time.Time
-	SettledAt         time.Time
-	Settled           bool
+	FinalizedAt       time.Time
+	Status            types.InvoiceStatus
 }
 
 type InvoiceCreationData struct {
@@ -41,8 +55,9 @@ type dbInvoice struct {
 
 	SettleRequestedAt time.Time `pg:"settle_requested_at"`
 
-	Settled   bool      `pg:"settled,use_zero"`
-	SettledAt time.Time `pg:"settled_at"`
+	FinalizedAt time.Time `pg:"finalized_at"`
+
+	Status types.InvoiceStatus `pg:"status"`
 }
 
 type dbHtlc struct {
@@ -57,8 +72,9 @@ type dbHtlc struct {
 
 	SettleRequestedAt time.Time `pg:"settle_requested_at"`
 
-	Settled   bool      `pg:"settled,use_zero"`
-	SettledAt time.Time `pg:"settled_at"`
+	FinalizedAt time.Time `pg:"finalized_at"`
+
+	Status types.HtlcStatus `pg:"status"`
 }
 
 // PostgresPersister persists items to Postgres
@@ -77,9 +93,9 @@ func unmarshallDbInvoice(invoice *dbInvoice) *Invoice {
 			},
 		},
 		SequenceNum:       invoice.SequenceNum,
-		Settled:           invoice.Settled,
 		SettleRequestedAt: invoice.SettleRequestedAt,
-		SettledAt:         invoice.SettledAt,
+		FinalizedAt:       invoice.FinalizedAt,
+		Status:            invoice.Status,
 	}
 }
 
@@ -163,7 +179,7 @@ func (p *PostgresPersister) GetPendingHtlcs(ctx context.Context, node common.Pub
 		var dbHtlcs []*dbHtlc
 		err := tx.ModelContext(ctx, &dbHtlcs).
 			Where("node=?", node).
-			Where("settled=?", false).
+			Where("status=?", types.HtlcStatusSettleRequested).
 			Select()
 		if err != nil {
 			return err
@@ -196,6 +212,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 			Preimage:          invoice.PaymentPreimage,
 			AmountMsat:        int64(invoice.Value),
 			SettleRequestedAt: now,
+			Status:            types.InvoiceStatusSettleRequested,
 		}
 
 		_, err := tx.ModelContext(ctx, dbInvoice).Insert() //nolint:contextcheck
@@ -211,6 +228,7 @@ func (p *PostgresPersister) RequestSettle(ctx context.Context,
 				HtlcID:            key.HtlcID,
 				AmountMsat:        amt,
 				SettleRequestedAt: now,
+				Status:            types.HtlcStatusSettleRequested,
 			}
 			_, err := tx.Model(&dbHtlc).Insert() // nolint:contextcheck
 			if err != nil {
@@ -245,53 +263,65 @@ func (p *PostgresPersister) getHtlcHash(ctx context.Context, tx *pg.Tx,
 	return htlc.Hash, nil
 }
 
-func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
-	key types.HtlcKey) (*lntypes.Hash, error) {
+func (p *PostgresPersister) MarkHtlcFinal(ctx context.Context,
+	key types.HtlcKey, settled bool) (*lntypes.Hash, error) {
 
-	var settledHash *lntypes.Hash
+	var invoiceHash *lntypes.Hash
 
 	err := p.conn.RunInTransaction(ctx, func(tx *pg.Tx) error {
-		// Select invoice FOR UPDATE to prevent incorrect counts when multiple
-		// htlcs for the same invoice are marked as settled concurrently.
+		// Select invoice FOR UPDATE to prevent concurrent update on the
+		// invoice/htlc.
 		invoice, err := p.selectInvoiceForUpdate(ctx, tx, key)
 		if err != nil {
 			return err
 		}
 
-		now := time.Now().UTC()
-
-		// Settle the HTLC in the database.
-		if err := p.settleHTLC(ctx, tx, key, now); err != nil {
-			return err
+		// If invoice has InvoiceStatusSettled status, it means that all
+		// HTLC were settled earlier and MarkHtlcFinal should not have
+		// been called again for this invoice.
+		if invoice.Status == types.InvoiceStatusSettled {
+			return ErrHtlcReceivedButInvoiceAlreadySettled
 		}
 
-		// Count number of htlcs that are not yet settled.
-		count, err := tx.ModelContext(ctx, (*dbHtlc)(nil)).
-			Where("hash=?", invoice.Hash).
-			Where("settled=?", false).
-			Count()
+		now := time.Now().UTC()
+
+		err = p.finalizeHTLC(ctx, tx, key, settled, now)
 		if err != nil {
 			return err
 		}
 
-		if count != 0 {
+		// It is possible that we received previously a HTLC that has
+		// failed for this invoice. In consequence, the invoice should
+		// have the FAILED status. However, a HTLC could have reached
+		// its final status afterward.
+		// We return nil here instead of the invoice hash to avoid
+		// notifying the user as the final event already happened
+		// earlier.
+		if invoice.Status == types.InvoiceStatusFailed {
 			return nil
 		}
 
-		// If all htlcs are settled, mark the invoice as settled.
-		result, err := tx.ModelContext(ctx, (*dbInvoice)(nil)).
-			Where("hash=?", invoice.Hash).
-			Set("settled=?", true).
-			Set("settled_at=?", now).
-			Update() // nolint:contextcheck
+		if settled {
+			// The HTLC is settled, now we check if all other HTLCs
+			// are settled as well. If all htlcs are settled, then
+			// we can settle the invoice.
+			allHtlcsSettled, err := p.allHtlcsAreSettled(ctx,
+				tx, invoice.Hash)
+			if err != nil {
+				return err
+			}
+			if !allHtlcsSettled {
+				return nil
+			}
+		}
+
+		err = p.finalizeInvoice(ctx, tx, invoice.Hash,
+			settled, now)
 		if err != nil {
 			return err
 		}
-		if result.RowsAffected() == 0 {
-			return types.ErrInvoiceNotFound
-		}
 
-		settledHash = &invoice.Hash
+		invoiceHash = &invoice.Hash
 
 		return nil
 	})
@@ -299,7 +329,7 @@ func (p *PostgresPersister) MarkHtlcSettled(ctx context.Context,
 		return nil, err
 	}
 
-	return settledHash, nil
+	return invoiceHash, nil
 }
 
 func (p *PostgresPersister) selectInvoiceForUpdate(ctx context.Context,
@@ -327,8 +357,15 @@ func (p *PostgresPersister) selectInvoiceForUpdate(ctx context.Context,
 	return &invoice, nil
 }
 
-func (p *PostgresPersister) settleHTLC(ctx context.Context,
-	tx *pg.Tx, key types.HtlcKey, settledAt time.Time) error {
+func (p *PostgresPersister) finalizeHTLC(ctx context.Context,
+	tx *pg.Tx, key types.HtlcKey, settled bool, finalizedAt time.Time) error {
+
+	var htlcFinalStatus types.HtlcStatus
+	if settled {
+		htlcFinalStatus = types.HtlcStatusSettled
+	} else {
+		htlcFinalStatus = types.HtlcStatusFailed
+	}
 
 	htlc := dbHtlc{
 		Node:   key.Node,
@@ -336,23 +373,65 @@ func (p *PostgresPersister) settleHTLC(ctx context.Context,
 		HtlcID: key.HtlcID,
 	}
 
-	// Mark htlc as settled. If the htlc is not found at this point, is must
-	// have been settled already. We were able to retrieve it earlier so it
+	// Change htlc status. If the htlc is not found at this point, status must
+	// have been changed already. We were able to retrieve it earlier, so it
 	// exists.
 	result, err := tx.ModelContext(ctx, &htlc).
 		WherePK().
-		Where("settled=?", false).
-		Set("settled=?", true).
-		Set("settled_at=?", settledAt).
+		Where("status=?", types.HtlcStatusSettleRequested).
+		Set("status=?", htlcFinalStatus).
+		Set("finalized_at=?", finalizedAt).
 		Update() // nolint:contextcheck
 	if err != nil {
 		return err
 	}
 	if result.RowsAffected() == 0 {
-		return ErrHtlcAlreadySettled
+		return ErrHtlcAlreadyFinal
 	}
 
 	return nil
+}
+
+func (p *PostgresPersister) finalizeInvoice(ctx context.Context,
+	tx *pg.Tx, hash lntypes.Hash, settled bool,
+	finalizedAt time.Time) error {
+
+	var invoiceFinalStatus types.InvoiceStatus
+	if settled {
+		invoiceFinalStatus = types.InvoiceStatusSettled
+	} else {
+		invoiceFinalStatus = types.InvoiceStatusFailed
+	}
+
+	result, err := tx.ModelContext(ctx, (*dbInvoice)(nil)).
+		Where("hash=?", hash).
+		Where("status=?", types.InvoiceStatusSettleRequested).
+		Set("status=?", invoiceFinalStatus).
+		Set("finalized_at=?", finalizedAt).
+		Update() // nolint:contextcheck
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrFinalizationFailed
+	}
+
+	return nil
+}
+
+func (p *PostgresPersister) allHtlcsAreSettled(ctx context.Context,
+	tx *pg.Tx, hash lntypes.Hash) (bool, error) {
+
+	// Count number of htlcs that are not yet settled.
+	count, err := tx.ModelContext(ctx, (*dbHtlc)(nil)).
+		Where("hash=?", hash).
+		Where("status=?", types.HtlcStatusSettleRequested).
+		Count()
+	if err != nil {
+		return false, err
+	}
+
+	return count == 0, nil
 }
 
 // Ping pings the database connection to ensure it is available
