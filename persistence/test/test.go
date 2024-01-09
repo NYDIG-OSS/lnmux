@@ -25,6 +25,7 @@ type TestDBSettings struct {
 func PGTestDSN() string {
 	dsn, ok := os.LookupEnv("LNMUX_TEST_DB_DSN")
 	if !ok {
+		//nolint:gosec
 		dsn = "postgres://bottle:bottle@localhost:45432/postgres?sslmode=disable"
 	}
 
